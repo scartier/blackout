@@ -360,9 +360,9 @@ Timer animTimer;              // timer used for lerps and pauses during animatio
 
 // Store our current puzzle state in a 32-bit int for easy comparison
 // Each RGB of the 6 faces corresponds to a nibble - so we only use 24 bits
-uint32_t colorState;
-uint32_t overlayState;
-uint32_t maskState;
+byte colorState[3];
+byte overlayState[3];
+byte maskState;
 
 #define COLOR_STATE_OFF   0x00000000
 #define COLOR_STATE_WHITE 0x00777777
@@ -489,7 +489,9 @@ void handleUserInput()
         gameState = GameState_Setup;
 
         // During setup, Working tiles are green
-        colorState = 0x00222222;
+        colorState[0] = 0;
+        colorState[1] = 0x3F;
+        colorState[2] = 0;
         showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
       }
     }
@@ -507,7 +509,9 @@ void handleUserInput()
       gameState = GameState_Setup;
 
       // Default to all blue - will light up faces with neighbors
-      colorState = 0x00444444;
+      colorState[0] = 0;
+      colorState[1] = 0;
+      colorState[2] = 0x3F;
       showAnimation(ANIM_SEQ_INDEX_BASE_PLUS_OVERLAY, DONT_CARE);
 
       // Reset our perception of each neighbor's state
@@ -766,7 +770,7 @@ void processCommForFace(Command command, byte value, byte f)
         enqueueCommOnFace(f, Command_RequestToolType, DONT_CARE);
         
         // During setup, Tool tiles are white
-        colorState = COLOR_STATE_WHITE;
+        colorState[0] = colorState[1] = colorState[2] = 0x3F;
         showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
         
         gameState = GameState_Setup;
@@ -843,13 +847,12 @@ void setupTarget()
 {
   bool neighborsChanged = false;
 
-  overlayState = 0;
-  uint32_t neighborColor = 0b110;
   FOREACH_FACE(f)
   {
+    overlayState[0] = overlayState[1] = overlayState[2] = 0;
     if (faceStatesComm[f].neighborPresent)
     {
-      overlayState |= neighborColor;
+      overlayState[1] = overlayState[2] = overlayState[1] | 1<<f;
       if (faceStatesGame[f].neighborTool.type == ToolType_Unassigned)
       {
         // Found a new neighbor
@@ -865,7 +868,6 @@ void setupTarget()
         faceStatesGame[f].neighborTool.type = ToolType_Unassigned;
       }
     }
-    neighborColor <<= 4;
   }
 
   if (neighborsChanged)
@@ -983,7 +985,7 @@ void generateToolsAndPuzzle()
   }
 
 #if DEBUG_SETUP
-  colorState = solutionState;
+  //colorState = solutionState;
   showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
 #endif
 }
@@ -1109,7 +1111,7 @@ void generateNewStartingSeed()
 
 void showAnimation_Init()
 {
-  colorState = 0x00777777;
+  colorState[0] = colorState[1] = colorState[2] = 0x3F;
   showAnimation(ANIM_SEQ_INDEX_SPIN, ANIM_RATE_SLOW);
   
   FOREACH_FACE(f)
@@ -1121,37 +1123,30 @@ void showAnimation_Init()
 void showAnimation_Tool()
 {
   // Create the mask corresponding to the pattern
-  maskState = 0xF;
-  for (byte f = 0; f <= 3; f++)
-  {
-    if (assignedTool.pattern & (0x1 << f))
-    {
-      maskState |= 0xF << ((f+1)<<2);
-    }
-  }
+  maskState = 0x1 | (assignedTool.pattern << 1);
 
   switch (assignedTool.type)
   {
     case ToolType_ColorR:
-      colorState = 0x00111111 & maskState;
+      colorState[0] = maskState; colorState[1] = 0; colorState[2] = 0;
       showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
       break;
       
     case ToolType_ColorG:
-      colorState = 0x00222222 & maskState;
+      colorState[0] = 0; colorState[1] = maskState; colorState[2] = 0;
       showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
       break;
       
     case ToolType_ColorB:
-      colorState = 0x00444444 & maskState;
+      colorState[0] = 0; colorState[1] = 0; colorState[2] = maskState;
       showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
       break;
 
     case ToolType_Copy:
     {
       // Fill in face 0 already since it is assumed
-      colorState = 0x00000007;
-      overlayState = 0x00777770 & maskState;
+      colorState[0] = colorState[1] = colorState[2] = 0x1;
+      overlayState[0] = overlayState[1] = overlayState[2] = maskState & 0x3E;
       showAnimation(ANIM_SEQ_INDEX_COPY, ANIM_RATE_SLOW);
     }
       break;
@@ -1186,9 +1181,9 @@ void lerpColors(byte inR1, byte inG1, byte inB1, byte inR2, byte inG2, byte inB2
   outRGB[2] = temp >> 7;
 }
 
-byte getColorFromState(uint32_t state, byte bitOffset)
+byte getColorFromState(byte state, byte bitOffset)
 {
-  byte colorBit = (state >> bitOffset) & 0x1;
+  byte colorBit = state >> bitOffset;
   char colorByte = colorBit << 7;
   colorByte >>= 7;  // use sign extension to fill with 0s or 1s
   return colorByte;
@@ -1198,15 +1193,13 @@ void renderAnimationStateOnFace(byte f)
 {
   FaceStateGame *faceStateGame = &faceStatesGame[f];
 
-  byte faceOffset = f<<2;
-  byte r = getColorFromState(colorState, faceOffset+0);
-  byte g = getColorFromState(colorState, faceOffset+1);
-  byte b = getColorFromState(colorState, faceOffset+2);
+  byte r = getColorFromState(colorState[0], f);
+  byte g = getColorFromState(colorState[1], f);
+  byte b = getColorFromState(colorState[2], f);
   
-  byte overlayRGB = (overlayState >> faceOffset) & 0xF;
-  byte overlayR = getColorFromState(overlayState, faceOffset+0);
-  byte overlayG = getColorFromState(overlayState, faceOffset+1);
-  byte overlayB = getColorFromState(overlayState, faceOffset+2);
+  byte overlayR = getColorFromState(overlayState[0], f);
+  byte overlayG = getColorFromState(overlayState[1], f);
+  byte overlayB = getColorFromState(overlayState[2], f);
   
   byte colorRGB[3];
   bool startNextCommand = false;
@@ -1222,10 +1215,13 @@ void renderAnimationStateOnFace(byte f)
       break;
 
     case AnimCommand_SolidWithOverlay:
-      colorRGB[0] = overlayRGB == 0 ? r : overlayR;
-      colorRGB[1] = overlayRGB == 0 ? g : overlayG;
-      colorRGB[2] = overlayRGB == 0 ? b : overlayB;
+    {
+      bool hasOverlay = (overlayState[0] | overlayState[1] | overlayState[2]) & (1<<f);
+      colorRGB[0] = hasOverlay ? overlayR : r;
+      colorRGB[1] = hasOverlay ? overlayG : g;
+      colorRGB[2] = hasOverlay ? overlayB : b;
       startNextCommand = true;
+    }
       break;
 
     case AnimCommand_LerpOverlayToBase:
