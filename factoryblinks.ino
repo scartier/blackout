@@ -364,9 +364,6 @@ byte colorState[3];
 byte overlayState[3];
 byte maskState;
 
-#define COLOR_STATE_OFF   0x00000000
-#define COLOR_STATE_WHITE 0x00777777
-
 #if SHOW_TOOL_TYPE_BITWISE
 bool showToolTypeBitwise;
 bool showToolPatternBitwise;
@@ -384,7 +381,7 @@ struct SolutionStep
 #define MAX_SOLUTION_STEPS 10
 SolutionStep solutionSteps[MAX_SOLUTION_STEPS];
 int numSolutionSteps;
-uint32_t solutionState;
+byte solutionState[3];
 
 
 // =================================================================================================
@@ -883,7 +880,10 @@ void setupTarget()
     }
 
     // Generate the tools and the puzzle based on them
-    generateToolsAndPuzzle();
+    if (numToolTiles > 0)
+    {
+      generateToolsAndPuzzle();
+    }
   }
 }
 
@@ -961,59 +961,93 @@ void generateToolsAndPuzzle()
   randSetSeed(puzzleSeed);
 
   // Fill up the solution with our tools
-  numSolutionSteps = 4;
-  for (byte i = 0, f = 0; i < MAX_SOLUTION_STEPS; i++, f++)
+  numSolutionSteps = 6;
+  byte stepIndex = 0;
+  byte f = 0;
+  solutionState[0] = solutionState[1] = solutionState[2] = 0;
+  maskState = 0;
+  while (stepIndex < numSolutionSteps)
   {
     if (faceStatesComm[f].neighborPresent && faceStatesGame[f].neighborTool.type != ToolType_Unassigned)
     {
-      solutionSteps[i].neighborFace = f;
-      solutionSteps[i].rotation = randRange(0, FACE_COUNT);
+      solutionSteps[stepIndex].neighborFace = f;
+
+      // Try to find a rotation that will result in a change in the solution
+      byte randRotation = randRange(0, FACE_COUNT);
+      FOREACH_FACE(rot)
+      {
+        if (applyTool(faceStatesGame[solutionSteps[stepIndex].neighborFace].neighborTool, randRotation, solutionState))
+        {
+          break;
+        }
+        randRotation = (randRotation >= 5) ? 0 : (randRotation + 1);
+      }
+      solutionSteps[stepIndex].rotation = randRotation;
+
+      stepIndex++;
     }
     
+    f++;
     if (f >= FACE_COUNT)
     {
       f = 0;
     }
   }
 
-  // Solution starts blank
-  solutionState = 0;
-  maskState = 0;
-  for (byte i = 0; i < numSolutionSteps; i++)
-  {
-    applyTool(faceStatesGame[solutionSteps[i].neighborFace].neighborTool, solutionSteps[i].rotation, &solutionState);
-  }
-
 #if DEBUG_SETUP
-  //colorState = solutionState;
+  colorState[0] = solutionState[0];
+  colorState[1] = solutionState[1];
+  colorState[2] = solutionState[2];
   showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
 #endif
 }
 
-void applyTool(ToolTypeAndPattern tool, byte rotation, uint32_t *state)
+bool applyTool(ToolTypeAndPattern tool, byte rotation, byte *state)
 {
-  uint32_t mask = 0xF;
-  for (byte f = 0; f <= 3; f++)
-  {
-    if (tool.pattern & (0x1 << f))
-    {
-      maskState |= 0xF << ((f+1)<<2);
-    }
-  }
+  // Save old state to know if we changed anything by applying this tool
+  byte oldState[3];
+  oldState[0] = state[0];
+  oldState[1] = state[1];
+  oldState[2] = state[2];
+  
+  byte toolMask = 0x1 | (tool.pattern << 1);
+  
+  // Apply rotation
+  toolMask = ((toolMask << rotation) | (toolMask >> (6 - rotation))) & 0x3F;
 
-  uint32_t newState = 0;
+  // Apply the mask Tool that might be in effect
+  toolMask &= ~maskState;
+
   switch (tool.type)
   {
-    case ToolType_ColorR: newState = 0x00111111 & mask; break;
-    case ToolType_ColorG: newState = 0x00222222 & mask; break;
-    case ToolType_ColorB: newState = 0x00444444 & mask; break;
+    case ToolType_ColorR: state[0] |= toolMask; break;//state[0] |=  toolMask;  state[1] &= ~toolMask;  state[2] &= ~toolMask;  break;
+    case ToolType_ColorG: state[1] |= toolMask; break;//state[0] &= ~toolMask;  state[1] |=  toolMask;  state[2] &= ~toolMask;  break;
+    case ToolType_ColorB: state[2] |= toolMask; break;//state[0] &= ~toolMask;  state[1] &= ~toolMask;  state[2] |=  toolMask;  break;
+    case ToolType_Copy:
+      {
+        for (byte i = 0; i < 3; i++)
+        {
+          // Set or clear the RGB component depending if the source component is set
+          if (state[i] & (1<<rotation))
+          {
+            state[i] |= toolMask;
+          }
+          else
+          {
+            state[i] &= ~toolMask;
+          }
+        }
+      }
+      break;
   }
 
-  // Apply rotation
-  rotation <<= 2;
-  newState = ((newState << rotation) | (newState >> (24 - rotation))) & 0x00FFFFFF;
+  byte resetMask = state[0] & state[1] & state[2];
+  state[0] &= ~resetMask;
+  state[1] &= ~resetMask;
+  state[2] &= ~resetMask;
 
-  *state |= newState & maskState;
+  byte changes = (oldState[0] ^ state[0]) | (oldState[1] ^ state[1]) | (oldState[2] ^ state[2]);
+  return (changes == 0) ? false : true;
 }
 
 // -------------------------------------------------------------------------------------------------
