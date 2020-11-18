@@ -8,7 +8,7 @@
 #define USE_DATA_SPONGE         0
 #define DEBUG_COMM              0
 #define SHOW_TILE_ID            0
-#define DEBUG_SETUP             0
+#define DEBUG_SETUP             1
 
 #if USE_DATA_SPONGE
 #warning DATA SPONGE ENABLED
@@ -117,8 +117,6 @@ struct ToolState
 #define COLOR_WHITE 3
 ToolState assignedTool = { TOOL_PATTERN_UNASSIGNED, 0, 0 };
 
-#define NUM_DIFFICULTY_LEVELS 6
-
 // Twelve possible patterns (not including all on & all off)
 byte patterns[] =
 {
@@ -212,7 +210,10 @@ enum GameState
 
 GameState gameState = GameState_Init;
 byte numTargetAndToolTiles = 0;
+
+#define NUM_DIFFICULTY_LEVELS 6
 byte difficulty = 0;
+
 uint32_t startingSeed = 0;
 
 byte rootFace = 0;  // used during setup for Tool tiles to know which face is the Target tile
@@ -319,6 +320,15 @@ void handleUserInput()
 
   if (buttonDoubleClicked())
   {
+    if (gameState == GameState_Setup && tileRole == TileRole_Working)
+    {
+      difficulty++;
+      if (difficulty >= NUM_DIFFICULTY_LEVELS)
+      {
+        difficulty = 0;
+      }
+      generateToolsAndPuzzle();
+    }
   }
 
   if (buttonSingleClicked() && !hasWoken())
@@ -686,10 +696,8 @@ void setupWorking()
 {
   if (numNeighbors != numTargetAndToolTiles)
   {
-    numTargetAndToolTiles = numNeighbors;
-
     // Generate the tools and the puzzle based on them
-    if (numTargetAndToolTiles > 1)
+    if (numNeighbors > 1)
     {
       generateToolsAndPuzzle();
     }
@@ -699,6 +707,8 @@ void setupWorking()
 void generateToolsAndPuzzle()
 {
   // Generate a puzzle based on the difficulty, number of tool tiles, and random seed
+
+  numTargetAndToolTiles = numNeighbors;
 
   // Nibble 4 (19:16) represents sixteen different puzzles using the same tools
   // It needs to be part of the starting seed so it can be shown to the player,
