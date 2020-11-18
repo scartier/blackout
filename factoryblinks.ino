@@ -8,9 +8,7 @@
 #define USE_DATA_SPONGE         0
 #define DEBUG_COMM              0
 #define SHOW_TILE_ID            0
-#define DEBUG_SETUP             1
-#define SHOW_COMM_QUEUE_LENGTH  0
-#define SHOW_TOOL_TYPE_BITWISE  0
+#define DEBUG_SETUP             0
 
 #if USE_DATA_SPONGE
 #warning DATA SPONGE ENABLED
@@ -58,14 +56,18 @@ enum Command
 #endif
 
   // Setup
-  Command_AssignRole,
-  Command_RequestToolType,
-  Command_AssignToolType,
-  Command_RequestToolPattern,
-  Command_AssignToolPattern,
-  Command_SetGameState,
+  Command_AssignRole,         // Working tile assigns roles to neighbors
+  Command_AssignToolPattern,  // Working tile assigns patterns to Tool tiles
 
-  Command_AnimSync,
+  // Play
+  Command_RequestPattern,
+  Command_RequestRotation,
+  Command_RequestColor,
+  Command_ToolPattern,
+  Command_ToolRotation,
+  Command_ToolColor,
+  
+  Command_SetGameState,
 };
 
 struct CommandAndData
@@ -81,6 +83,8 @@ CommandAndData commQueues[FACE_COUNT][COMM_QUEUE_SIZE];
 #define COMM_INDEX_OUT_OF_SYNC   0xFE
 byte commInsertionIndexes[FACE_COUNT];
 
+byte numNeighbors = 0;
+
 #define ErrorOnFace(f) (commInsertionIndexes[f] > COMM_QUEUE_SIZE)
 
 #if DEBUG_COMM
@@ -95,172 +99,41 @@ Timer sendNewStateTimer;
 enum TileRole
 {
   TileRole_Unassigned,
-  TileRole_Target,
+//  TileRole_Target,
   TileRole_Working,
   TileRole_Tool
 };
 
 TileRole tileRole = TileRole_Unassigned;
 
-enum ToolType
+struct ToolState
 {
-  ToolType_Unassigned,
-  ToolType_Color1,
-  ToolType_Color2,
-  ToolType_Color3,
-  ToolType_Copy,
-  ToolType_Mask,
-  ToolType_Wedge,
-  ToolType_Swap,
-  ToolType_Erase,
-
-  ToolType_Color1Start,
-  ToolType_ColorR = ToolType_Color1Start,
-  ToolType_ColorG,
-  ToolType_ColorB,
-  ToolType_Color1End = ToolType_ColorB,
-
-  ToolType_Color2Start,
-  ToolType_ColorRG = ToolType_Color2Start,
-  ToolType_ColorRB,
-  ToolType_ColorGB,
-  ToolType_Color2End = ToolType_ColorGB,
+  byte pattern  : 4;
+  byte color    : 2;
+  byte rotation : 3;
 };
 
-struct ToolTypeAndPattern
-{
-  ToolType type : 4;
-  byte pattern : 4;
-};
-
-ToolTypeAndPattern assignedTool = { ToolType_Unassigned, 0 };
+#define TOOL_PATTERN_UNASSIGNED 0b1110    // unused pattern is our "unassigned" key value
+#define COLOR_WHITE 3
+ToolState assignedTool = { TOOL_PATTERN_UNASSIGNED, 0, 0 };
 
 #define NUM_DIFFICULTY_LEVELS 6
-/*
-ToolTypeAndPattern tools[NUM_DIFFICULTY_LEVELS][3*(NUM_DIFFICULTY_LEVELS+1)] =
+
+// Twelve possible patterns (not including all on & all off)
+byte patterns[] =
 {
-  // SLOT 1 (color tools only)
-  {
-    { ToolType_Color1, 0b0000 }, { ToolType_Color1, 0b0000 }, { ToolType_Color1, 0b0000 },    // Difficulty 1
-    { ToolType_Color1, 0b0000 }, { ToolType_Color1, 0b0000 }, { ToolType_Color1, 0b0000 },    // Difficulty 1-2
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 }, { ToolType_Color1, 0b0100 },    // Difficulty 2-3
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 }, { ToolType_Color1, 0b0100 },    // Difficulty 3-4
-    { ToolType_Color1, 0b0011 }, { ToolType_Color1, 0b1010 }, { ToolType_Color1, 0b0101 },    // Difficulty 4-5
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 }, { ToolType_Color2, 0b0100 },    // Difficulty 5-6
-    { ToolType_Color2, 0b0011 }, { ToolType_Color2, 0b1010 }, { ToolType_Color2, 0b1001 },    // Difficulty 6
-  },
-  // SLOT 2 (color tools only)
-  {
-    { ToolType_Color1, 0b0000 }, { ToolType_Color1, 0b0000 }, { ToolType_Color1, 0b0000 },    // Difficulty 1
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 }, { ToolType_Color1, 0b0100 },    // Difficulty 1-2
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 }, { ToolType_Color1, 0b0100 },    // Difficulty 2-3
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 }, { ToolType_Color1, 0b0100 },    // Difficulty 3-4
-    { ToolType_Color1, 0b0011 }, { ToolType_Color1, 0b1010 }, { ToolType_Color1, 0b0101 },    // Difficulty 4-5
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 }, { ToolType_Color2, 0b0100 },    // Difficulty 5-6
-    { ToolType_Color2, 0b0011 }, { ToolType_Color2, 0b1010 }, { ToolType_Color2, 0b1001 },    // Difficulty 6
-  },
-  // SLOT 3 (widget tools only)
-  {
-    { ToolType_Copy,   0b0001 }, { ToolType_Copy,   0b0010 }, { ToolType_Copy,   0b0100 },
-    { ToolType_Copy,   0b1000 }, { ToolType_Copy,   0b1000 }, { ToolType_Copy,   0b0001 },
-    { ToolType_Mask,   0b0001 }, { ToolType_Mask,   0b0001 }, { ToolType_Mask,   0b0001 },
-    { ToolType_Copy,   0b0010 }, { ToolType_Copy,   0b0100 }, { ToolType_Copy,   0b1000 },
-    { ToolType_Mask,   0b0010 }, { ToolType_Mask,   0b0100 }, { ToolType_Mask,   0b0011 },
-    { ToolType_Copy,   0b0110 }, { ToolType_Copy,   0b1100 }, { ToolType_Copy,   0b1010 },
-    { ToolType_Mask,   0b1010 }, { ToolType_Mask,   0b0101 }, { ToolType_Mask,   0b1001 },
-  },
-  // SLOT 4 (color tools only)
-  {
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 }, { ToolType_Color1, 0b0100 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 }, { ToolType_Color1, 0b0100 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 }, { ToolType_Color1, 0b0100 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 }, { ToolType_Color1, 0b0100 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 }, { ToolType_Color2, 0b0100 },
-    { ToolType_Color2, 0b0101 }, { ToolType_Color2, 0b1100 }, { ToolType_Color2, 0b0111 },
-  },
-  // SLOT 5 (color or widget tools)
-  {
-    { ToolType_Color1, 0b0011 }, { ToolType_Color1, 0b0110 }, { ToolType_Color1, 0b1010 },
-    { ToolType_Swap,   0b0001 }, { ToolType_Swap,   0b0010 }, { ToolType_Swap,   0b0100 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 }, { ToolType_Color2, 0b0100 },
-    { ToolType_Swap,   0b0001 }, { ToolType_Swap,   0b0010 }, { ToolType_Swap,   0b0100 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 }, { ToolType_Color2, 0b0100 },
-    { ToolType_Swap,   0b0001 }, { ToolType_Swap,   0b0010 }, { ToolType_Swap,   0b0100 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 }, { ToolType_Color2, 0b0100 },
-  },
-  // SLOT 6 (widget tools only)
-  {
-    { ToolType_Copy,   0b0001 }, { ToolType_Copy,   0b0010 }, { ToolType_Copy,   0b0100 },
-    { ToolType_Copy,   0b1000 }, { ToolType_Copy,   0b1000 }, { ToolType_Copy,   0b0001 },
-    { ToolType_Mask,   0b0001 }, { ToolType_Mask,   0b0001 }, { ToolType_Mask,   0b0001 },
-    { ToolType_Copy,   0b0010 }, { ToolType_Copy,   0b0100 }, { ToolType_Copy,   0b1000 },
-    { ToolType_Mask,   0b0010 }, { ToolType_Mask,   0b0100 }, { ToolType_Mask,   0b0011 },
-    { ToolType_Copy,   0b0110 }, { ToolType_Copy,   0b1100 }, { ToolType_Copy,   0b1010 },
-    { ToolType_Mask,   0b1010 }, { ToolType_Mask,   0b0101 }, { ToolType_Mask,   0b1001 },
-  },
-};
-*/
-ToolTypeAndPattern tools[NUM_DIFFICULTY_LEVELS][2*(NUM_DIFFICULTY_LEVELS+1)] =
-{
-  // SLOT 1 (color tools only)
-  {
-    { ToolType_Color1, 0b0000 }, { ToolType_Color1, 0b0000 },
-    { ToolType_Color1, 0b0000 }, { ToolType_Color1, 0b0000 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 },
-    { ToolType_Color1, 0b0011 }, { ToolType_Color1, 0b1010 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 },
-    { ToolType_Color2, 0b0011 }, { ToolType_Color2, 0b1010 },
-  },
-  // SLOT 2 (color tools only)
-  {
-    { ToolType_Color1, 0b0000 }, { ToolType_Color1, 0b0000 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 },
-    { ToolType_Color1, 0b0011 }, { ToolType_Color1, 0b1010 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 },
-    { ToolType_Color2, 0b0011 }, { ToolType_Color2, 0b1010 },
-  },
-  // SLOT 3 (widget tools only)
-  {
-    { ToolType_Copy,   0b0001 }, { ToolType_Copy,   0b0010 },
-    { ToolType_Copy,   0b1000 }, { ToolType_Copy,   0b1000 },
-    { ToolType_Mask,   0b0001 }, { ToolType_Mask,   0b0001 },
-    { ToolType_Copy,   0b0010 }, { ToolType_Copy,   0b0100 },
-    { ToolType_Mask,   0b0010 }, { ToolType_Mask,   0b0100 },
-    { ToolType_Copy,   0b0110 }, { ToolType_Copy,   0b1100 },
-    { ToolType_Mask,   0b1010 }, { ToolType_Mask,   0b0101 },
-  },
-  // SLOT 4 (color tools only)
-  {
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 },
-    { ToolType_Color1, 0b0001 }, { ToolType_Color1, 0b0010 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 },
-    { ToolType_Color2, 0b0101 }, { ToolType_Color2, 0b1100 },
-  },
-  // SLOT 5 (color or widget tools)
-  {
-    { ToolType_Color1, 0b0011 }, { ToolType_Color1, 0b0110 },
-    { ToolType_Swap,   0b0001 }, { ToolType_Swap,   0b0010 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 },
-    { ToolType_Swap,   0b0001 }, { ToolType_Swap,   0b0010 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 },
-    { ToolType_Swap,   0b0001 }, { ToolType_Swap,   0b0010 },
-    { ToolType_Color2, 0b0001 }, { ToolType_Color2, 0b0010 },
-  },
-  // SLOT 6 (widget tools only)
-  {
-    { ToolType_Copy,   0b0001 }, { ToolType_Copy,   0b0010 },
-    { ToolType_Copy,   0b1000 }, { ToolType_Copy,   0b1000 },
-    { ToolType_Mask,   0b0001 }, { ToolType_Mask,   0b0001 },
-    { ToolType_Copy,   0b0010 }, { ToolType_Copy,   0b0100 },
-    { ToolType_Mask,   0b0010 }, { ToolType_Mask,   0b0100 },
-    { ToolType_Copy,   0b0110 }, { ToolType_Copy,   0b1100 },
-    { ToolType_Mask,   0b1010 }, { ToolType_Mask,   0b0101 },
-  },
+  0b0000,   // 1
+  0b0001,   // 2
+  0b0010,
+  0b0100,
+  0b0011,   // 3
+  0b0101,
+  0b1001,
+  0b1010,
+  0b0111,   // 4
+  0b1011,
+  0b1101,
+  0b1111    // 5
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -332,13 +205,13 @@ enum GameState
 {
   GameState_Init,     // tiles were just programmed - waiting for click of Target tile
   GameState_Setup,    // let player choose number of tool tiles and difficulty
-  GameState_Detach,   // player started game - wait for tool tile to detach from Target tile
+//  GameState_Detach,   // detach the tool tiles from working tile before the pattern is revealed
   GameState_Play,     // gameplay
   GameState_Done      // player matched the Target tile
 };
 
 GameState gameState = GameState_Init;
-byte numToolTiles = 0;
+byte numTargetAndToolTiles = 0;
 byte difficulty = 0;
 uint32_t startingSeed = 0;
 
@@ -352,37 +225,16 @@ struct FaceStateGame
   byte animIndexCur;
 
   // Used during setup
-  ToolTypeAndPattern neighborTool;
+  ToolState neighborTool;
 };
 FaceStateGame faceStatesGame[FACE_COUNT];
 uint32_t animRate;            // lerp/pause rate
 Timer animTimer;              // timer used for lerps and pauses during animation
 
-// Store our current puzzle state in a 32-bit int for easy comparison
-// Each RGB of the 6 faces corresponds to a nibble - so we only use 24 bits
-byte colorState[3];
-byte overlayState[3];
-byte maskState;
-
-#if SHOW_TOOL_TYPE_BITWISE
-bool showToolTypeBitwise;
-bool showToolPatternBitwise;
-#endif
-
-// -------------------------------------------------------------------------------------------------
-// SOLUTION
-// -------------------------------------------------------------------------------------------------
-
-struct SolutionStep
-{
-  byte neighborFace : 3;
-  byte rotation : 3;
-};
-#define MAX_SOLUTION_STEPS 10
-SolutionStep solutionSteps[MAX_SOLUTION_STEPS];
-int numSolutionSteps;
-byte solutionState[3];
-
+// Store our current puzzle state
+byte startingState[3];        // how the puzzle starts
+byte colorState[3];           // the current state displayed
+byte overlayState[3];         // used for animations or to hide things
 
 // =================================================================================================
 //
@@ -425,20 +277,9 @@ void loop()
   switch (gameState)
   {
     case GameState_Init:  break; // do nothing - waiting for click in handleUserInput()
-
-    case GameState_Setup:
-      loopSetup();
-      break;
-
-    case GameState_Detach:
-      loopDetach();
-      break;
-
-    case GameState_Play:
-      break;
-
-    case GameState_Done:
-      break;
+    case GameState_Setup: loopSetup();  break;
+    case GameState_Play:  loopPlay();   break;
+    case GameState_Done:  break;
   }
 
 #if DEBUG_COMM
@@ -478,82 +319,59 @@ void handleUserInput()
 
   if (buttonDoubleClicked())
   {
-    if (gameState == GameState_Init || gameState == GameState_Setup)
-    {
-      if (isAlone())
-      {
-        tileRole = TileRole_Working;
-        gameState = GameState_Setup;
-
-        // During setup, Working tiles are green
-        colorState[0] = 0;
-        colorState[1] = 0x3F;
-        colorState[2] = 0;
-        showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
-      }
-    }
-    
-    if (gameState == GameState_Setup && tileRole == TileRole_Target)
-    {
-    }
   }
 
   if (buttonSingleClicked() && !hasWoken())
   {
-    if (gameState == GameState_Init)
+    switch (gameState)
     {
-      tileRole = TileRole_Target;
-      gameState = GameState_Setup;
+      case GameState_Init:
+        tileRole = TileRole_Working;
+        gameState = GameState_Setup;
+  
+        // TODO : Start animation
+        colorState[0] = 0; colorState[1] = 0; colorState[2] = 0x3F;
+        showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
+  
+        // Button clicking provides our entropy for the initial random seed
+        randSetSeed(millis());
+        generateNewStartingSeed();
+        break;
 
-      // Default to all blue - will light up faces with neighbors
-      colorState[0] = 0;
-      colorState[1] = 0;
-      colorState[2] = 0x3F;
-      showAnimation(ANIM_SEQ_INDEX_BASE_PLUS_OVERLAY, DONT_CARE);
+      case GameState_Setup:
+        if (tileRole == TileRole_Working && numNeighbors > 0)
+        {
+          gameState = GameState_Play;
+          
+          // Start the game
+          FOREACH_FACE(f)
+          {
+            if (faceStatesComm[f].neighborPresent)
+            {
+              enqueueCommOnFace(f, Command_SetGameState, GameState_Play);
+            }
+          }
 
-      // Reset our perception of each neighbor's state
-      FOREACH_FACE(f)
-      {
-        faceStatesGame[f].neighborTool.type = ToolType_Unassigned;
-      }
-
-      // Button clicking provides our entropy for the initial random seed
-      randSetSeed(millis());
-      generateNewStartingSeed();
-    }
-    else if (tileRole == TileRole_Target && gameState == GameState_Setup)
-    {
-      // Tell the player to detach all the Tool tiles
-      // Once all of the Tool tiles are detached, the game will start
-      gameState = GameState_Detach;
-
-      // Tell the player to detach all the Tools from the Target
-      FOREACH_FACE(f)
-      {
-        enqueueCommOnFace(f, Command_SetGameState, GameState_Detach);
-      }
-    }
+          updateWorkingState();
+        }
+        else if (tileRole == TileRole_Tool)
+        {
 #if DEBUG_SETUP
-    else if (tileRole == TileRole_Tool && (gameState == GameState_Setup || gameState == GameState_Detach))
-    {
-#if SHOW_TOOL_TYPE_BITWISE
-      if (showToolTypeBitwise)
-      {
-        showToolTypeBitwise = false;
-        showToolPatternBitwise = true;
-      }
-      else if (showToolPatternBitwise)
-      {
-        showToolPatternBitwise = false;
-      }
-      else
-      {
-        showToolTypeBitwise = true;
-      }
+          showAnimation_Tool();
 #endif
-      showAnimation_Tool();
+        }
+        break;
+
+      case GameState_Play:
+        if (tileRole == TileRole_Tool)
+        {
+          // Cycle through the primary colors and white
+          assignedTool.color = (assignedTool.color == COLOR_WHITE) ? 0 : (assignedTool.color + 1);
+          showAnimation_Tool();
+          enqueueCommOnFace(rootFace, Command_ToolColor, assignedTool.color);
+        }
+        break;
     }
-#endif
   }
 }
 
@@ -622,6 +440,7 @@ void enqueueCommOnFace(byte f, Command command, byte data)
 // so that we can act on any new data being sent.
 void updateCommOnFaces()
 {
+  numNeighbors = 0;
   FOREACH_FACE(f)
   {
     FaceStateComm *faceStateComm = &faceStatesComm[f];
@@ -636,6 +455,7 @@ void updateCommOnFaces()
     }
 
     faceStateComm->neighborPresent = true;
+    numNeighbors++;
 
     // If there is any kind of error on the face then do nothing
     // The error can be reset by removing the neighbor
@@ -759,40 +579,12 @@ void processCommForFace(Command command, byte value, byte f)
     case Command_AssignRole:
       // Grab our new role
       tileRole = (TileRole) value;
+      rootFace = f;
+      gameState = GameState_Setup;
       if (tileRole == TileRole_Tool)
       {
-        rootFace = f;
-        
-        // Request the tool type
-        enqueueCommOnFace(f, Command_RequestToolType, DONT_CARE);
-        
-        // During setup, Tool tiles are white
         colorState[0] = colorState[1] = colorState[2] = 0x3F;
         showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
-        
-        gameState = GameState_Setup;
-      }
-      break;
-
-    case Command_RequestToolType:
-      if (tileRole == TileRole_Target)
-      {
-        enqueueCommOnFace(f, Command_AssignToolType, faceStatesGame[f].neighborTool.type);
-      }
-      break;
-
-    case Command_AssignToolType:
-      if (tileRole == TileRole_Tool)
-      {
-        assignedTool.type = (ToolType) value;
-        enqueueCommOnFace(f, Command_RequestToolPattern, DONT_CARE);
-      }
-      break;
-      
-    case Command_RequestToolPattern:
-      if (tileRole == TileRole_Target)
-      {
-        enqueueCommOnFace(f, Command_AssignToolPattern, faceStatesGame[f].neighborTool.pattern);
       }
       break;
 
@@ -800,21 +592,71 @@ void processCommForFace(Command command, byte value, byte f)
       if (tileRole == TileRole_Tool)
       {
         assignedTool.pattern = value;
+        assignedTool.color = COLOR_WHITE;
 #if DEBUG_SETUP
         showAnimation_Tool();
 #endif
       }
       break;
-
+      
     case Command_SetGameState:
       if (tileRole == TileRole_Tool)
       {
         gameState = (GameState) value;
-        if (gameState == GameState_Detach)
+        if (gameState == GameState_Play)
         {
-          // Start pulsing so the player knows to detach everything
-          showAnimation(ANIM_SEQ_INDEX_PULSE, ANIM_RATE_FAST);
+          showAnimation_Tool();
         }
+      }
+      break;
+
+    case Command_RequestPattern:
+      if (tileRole == TileRole_Tool)
+      {
+        enqueueCommOnFace(f, Command_ToolPattern, assignedTool.pattern);
+      }
+      break;
+      
+    case Command_RequestRotation:
+      if (tileRole == TileRole_Tool)
+      {
+        // We send the face that received this comm so the requester
+        // can compute our relative rotation
+        enqueueCommOnFace(f, Command_ToolRotation, f);
+      }
+      break;
+
+    case Command_RequestColor:
+      if (tileRole == TileRole_Tool)
+      {
+        enqueueCommOnFace(f, Command_ToolColor, assignedTool.color);
+      }
+      break;
+
+    case Command_ToolPattern:
+      if (tileRole == TileRole_Working)
+      {
+        faceStatesGame[f].neighborTool.pattern = value;
+        enqueueCommOnFace(f, Command_RequestRotation, DONT_CARE);
+      }
+      break;
+
+    case Command_ToolRotation:
+      if (tileRole == TileRole_Working)
+      {
+        // Figure out how the Tool tile is rotated relative to the Working tile
+        byte oppositeFace = OPPOSITE_FACE(value);
+        char offset = f - oppositeFace;
+        faceStatesGame[f].neighborTool.rotation = (offset < 0) ? (offset + 6) : offset;
+        enqueueCommOnFace(f, Command_RequestColor, DONT_CARE);
+      }
+      break;
+      
+    case Command_ToolColor:
+      if (tileRole == TileRole_Working)
+      {
+        faceStatesGame[f].neighborTool.color = value;
+        updateWorkingState();
       }
       break;
   }
@@ -831,56 +673,23 @@ void loopSetup()
 {
   switch (tileRole)
   {
-    case TileRole_Target: setupTarget(); break;
-    case TileRole_Tool:   setupTool(); break;
+    case TileRole_Working:  setupWorking(); break;
+    case TileRole_Tool:     setupTool(); break;
   }
 }
 
 // -------------------------------------------------------------------------------------------------
-// TARGET
+// WORKING
 // -------------------------------------------------------------------------------------------------
 
-void setupTarget()
+void setupWorking()
 {
-  bool neighborsChanged = false;
-
-  FOREACH_FACE(f)
+  if (numNeighbors != numTargetAndToolTiles)
   {
-    overlayState[0] = overlayState[1] = overlayState[2] = 0;
-    if (faceStatesComm[f].neighborPresent)
-    {
-      overlayState[1] = overlayState[2] = overlayState[1] | 1<<f;
-      if (faceStatesGame[f].neighborTool.type == ToolType_Unassigned)
-      {
-        // Found a new neighbor
-        neighborsChanged = true;
-      }
-    }
-    else
-    {
-      if (faceStatesGame[f].neighborTool.type != ToolType_Unassigned)
-      {
-        // Lost a neighbor
-        neighborsChanged = true;
-        faceStatesGame[f].neighborTool.type = ToolType_Unassigned;
-      }
-    }
-  }
-
-  if (neighborsChanged)
-  {
-    // Find out how many tool tiles there are and assign Tool indexes
-    numToolTiles = 0;
-    FOREACH_FACE(f)
-    {
-      if (faceStatesComm[f].neighborPresent)
-      {
-        numToolTiles++;
-      }
-    }
+    numTargetAndToolTiles = numNeighbors;
 
     // Generate the tools and the puzzle based on them
-    if (numToolTiles > 0)
+    if (numTargetAndToolTiles > 1)
     {
       generateToolsAndPuzzle();
     }
@@ -897,19 +706,9 @@ void generateToolsAndPuzzle()
   // shouldn't change based on it.
 
   uint32_t puzzleSeed = startingSeed;
-  puzzleSeed |= (uint32_t) numToolTiles << 24;
+  puzzleSeed |= (uint32_t) numTargetAndToolTiles << 24;
   puzzleSeed |= (uint32_t) difficulty << 28;
 
-  // Mask it out [19:16] while we select tools
-  uint32_t toolSeed = puzzleSeed & 0xFFF0FFFF;
-  randSetSeed(toolSeed);
-
-  // This is the base index into Tools[] array from which to randomly select tools for each slot
-  byte toolDifficultyBase = difficulty * 2;
-
-  ToolType color1Type = (ToolType)((byte) ToolType_Color1Start + randRange(0, 3));
-  ToolType color2Type = (ToolType)((byte) ToolType_Color2Start + randRange(0, 3));
-  
   byte toolSlotIndex = 0;
   FOREACH_FACE(f)
   {
@@ -917,93 +716,86 @@ void generateToolsAndPuzzle()
     {
       continue;
     }
-    
-    // Randomly choose among the tools for each slot
-    byte randomToolIndex = toolDifficultyBase + randRange(0, 4);
-    ToolTypeAndPattern tool = tools[toolSlotIndex][randomToolIndex];
 
-    // Swap out ToolType_Color# for the one with an actual color
-    if (tool.type == ToolType_Color1)
-    {
-      tool.type = color1Type;
-      color1Type = (ToolType)(((byte) color1Type) + 1);
-      if (color1Type > ToolType_Color1End)
-      {
-        color1Type = ToolType_Color1Start;
-      }
-    }
-
-    if (tool.type == ToolType_Color2)
-    {
-      tool.type = color2Type;
-      color2Type = (ToolType)(((byte) color2Type) + 1);
-      if (color2Type > ToolType_Color2End)
-      {
-        color2Type = ToolType_Color2Start;
-      }
-    }
-
-    faceStatesGame[f].neighborTool = tool;
+    // Choose the tools sequentially
+    faceStatesGame[f].neighborTool.pattern = patterns[difficulty+toolSlotIndex];
 
     // Make it a Tool tile
     // The neighbor will then request the tool type & pattern
     enqueueCommOnFace(f, Command_AssignRole, TileRole_Tool);
+    enqueueCommOnFace(f, Command_AssignToolPattern, faceStatesGame[f].neighborTool.pattern);
 
-    // Quit when we're done
     toolSlotIndex++;
-    if (toolSlotIndex >= numToolTiles || toolSlotIndex >= MAX_TOOL_TILES)
-    {
-      break;
-    }
   }
 
   // Now that we're generating the actual puzzle, use a seed that includes [19:16]
   randSetSeed(puzzleSeed);
 
-  // Fill up the solution with our tools
-  numSolutionSteps = 6;
-  byte stepIndex = 0;
-  byte f = 0;
-  solutionState[0] = solutionState[1] = solutionState[2] = 0;
-  maskState = 0;
-  while (stepIndex < numSolutionSteps)
+  // Fill up the starting state with our tools
+  startingState[0] = startingState[1] = startingState[2] = 0;
+  byte randColor = randRange(0, 3);
+  FOREACH_FACE(f)
   {
-    if (faceStatesComm[f].neighborPresent && faceStatesGame[f].neighborTool.type != ToolType_Unassigned)
+    if (faceStatesComm[f].neighborPresent)
     {
-      solutionSteps[stepIndex].neighborFace = f;
+      faceStatesGame[f].neighborTool.color = randColor;
+      faceStatesGame[f].neighborTool.rotation = randRange(0, FACE_COUNT);
 
-      // Try to find a rotation that will result in a change in the solution
-      byte randRotation = randRange(0, FACE_COUNT);
-      FOREACH_FACE(rot)
-      {
-        if (applyTool(faceStatesGame[solutionSteps[stepIndex].neighborFace].neighborTool, randRotation, solutionState))
-        {
-          break;
-        }
-        randRotation = (randRotation >= 5) ? 0 : (randRotation + 1);
-      }
-      solutionSteps[stepIndex].rotation = randRotation;
-
-      stepIndex++;
-    }
-    
-    f++;
-    if (f >= FACE_COUNT)
-    {
-      f = 0;
+      // Go sequentially through RGB
+      randColor = (randColor == 2) ? 0 : (randColor + 1);
     }
   }
+  updateStateWithTools(startingState);
 
+  // Clear Tool colors at start
+  FOREACH_FACE(f)
+  {
+    if (faceStatesComm[f].neighborPresent)
+    {
+      faceStatesGame[f].neighborTool.color = COLOR_WHITE;
+    }
+  }
+  
 #if DEBUG_SETUP
-  colorState[0] = solutionState[0];
-  colorState[1] = solutionState[1];
-  colorState[2] = solutionState[2];
+  colorState[0] = startingState[0];
+  colorState[1] = startingState[1];
+  colorState[2] = startingState[2];
   showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
 #endif
 }
 
-bool applyTool(ToolTypeAndPattern tool, byte rotation, byte *state)
+void updateWorkingState()
 {
+  colorState[0] = startingState[0];
+  colorState[1] = startingState[1];
+  colorState[2] = startingState[2];
+
+  updateStateWithTools(colorState);
+}
+
+void updateStateWithTools(byte *state)
+{
+  // Apply all the attached tools
+  FOREACH_FACE(f)
+  {
+    if (faceStatesComm[f].neighborPresent)
+    {
+      applyTool(faceStatesGame[f].neighborTool, state);
+    }
+  }
+}
+
+void applyTool(ToolState tool, byte *state)
+{
+  if (tool.pattern == TOOL_PATTERN_UNASSIGNED)
+  {
+    return;
+  }
+  if (tool.color == COLOR_WHITE)
+  {
+    return;
+  }
+        
   // Save old state to know if we changed anything by applying this tool
   byte oldState[3];
   oldState[0] = state[0];
@@ -1013,45 +805,13 @@ bool applyTool(ToolTypeAndPattern tool, byte rotation, byte *state)
   byte toolMask = 0x1 | (tool.pattern << 1);
   
   // Apply rotation
-  toolMask = ((toolMask << rotation) | (toolMask >> (6 - rotation))) & 0x3F;
+  toolMask = ((toolMask << tool.rotation) | (toolMask >> (6 - tool.rotation))) & 0x3F;
 
-  // Apply the mask Tool that might be in effect
-  toolMask &= ~maskState;
-
-  switch (tool.type)
-  {
-    case ToolType_ColorR: state[0] |= toolMask; break;//state[0] |=  toolMask;  state[1] &= ~toolMask;  state[2] &= ~toolMask;  break;
-    case ToolType_ColorG: state[1] |= toolMask; break;//state[0] &= ~toolMask;  state[1] |=  toolMask;  state[2] &= ~toolMask;  break;
-    case ToolType_ColorB: state[2] |= toolMask; break;//state[0] &= ~toolMask;  state[1] &= ~toolMask;  state[2] |=  toolMask;  break;
-    case ToolType_Copy:
-      {
-        for (byte i = 0; i < 3; i++)
-        {
-          // Set or clear the RGB component depending if the source component is set
-          if (state[i] & (1<<rotation))
-          {
-            state[i] |= toolMask;
-          }
-          else
-          {
-            state[i] &= ~toolMask;
-          }
-        }
-      }
-      break;
-  }
-
-  byte resetMask = state[0] & state[1] & state[2];
-  state[0] &= ~resetMask;
-  state[1] &= ~resetMask;
-  state[2] &= ~resetMask;
-
-  byte changes = (oldState[0] ^ state[0]) | (oldState[1] ^ state[1]) | (oldState[2] ^ state[2]);
-  return (changes == 0) ? false : true;
+  state[tool.color] ^= toolMask;
 }
 
 // -------------------------------------------------------------------------------------------------
-// TOOL
+// TOOL & TARGET
 // -------------------------------------------------------------------------------------------------
 
 void setupTool()
@@ -1061,7 +821,7 @@ void setupTool()
   {
     gameState = GameState_Init;
     tileRole = TileRole_Unassigned;
-    assignedTool = { ToolType_Unassigned, 0 };
+    assignedTool = { TOOL_PATTERN_UNASSIGNED, 0 };
 
     showAnimation_Init();
   }
@@ -1069,29 +829,59 @@ void setupTool()
 
 // =================================================================================================
 //
-// GAME STATE: DETACH
-// Wait for the player to detach all Tool tiles from the Target tile and all Tool tiles from
-// one another.
+// GAME STATE: PLAY
 //
 // =================================================================================================
 
-void loopDetach()
+void loopPlay()
 {
-  // Just waiting for all neighbors to detach before starting the game
-  if (isAlone())
+  switch (tileRole)
   {
-    gameState = GameState_Play;
-
-    // Show the Target and Tool patterns
-    if (tileRole == TileRole_Target)
-    {
-      // Show the target pattern
-    }
-    else if (tileRole == TileRole_Tool)
-    {
-      showAnimation_Tool();
-    }
+    case TileRole_Working:  playWorking(); break;
+    case TileRole_Tool:     playTool(); break;
   }
+}
+
+void playWorking()
+{
+  // Check for a Tool added or removed
+  if (numNeighbors != numTargetAndToolTiles)
+  {
+    numTargetAndToolTiles = numNeighbors;
+
+    FOREACH_FACE(f)
+    {
+      if (faceStatesComm[f].neighborPresent)
+      {
+        if (faceStatesGame[f].neighborTool.pattern == TOOL_PATTERN_UNASSIGNED)
+        {
+          // Give the tool a pattern so that it doesn't fall in here again, but make it WHITE so it doesn't get drawn yet
+          faceStatesGame[f].neighborTool.pattern = 0;
+          faceStatesGame[f].neighborTool.color = COLOR_WHITE;
+          
+          enqueueCommOnFace(f, Command_RequestPattern, DONT_CARE);
+        }
+      }
+      else
+      {
+        faceStatesGame[f].neighborTool.pattern = TOOL_PATTERN_UNASSIGNED;
+      }
+    }
+
+    // Update the color state
+    updateWorkingState();
+  }
+
+  // Check for win state
+  if (colorState[0] == 0 && colorState[1] == 0 && colorState[2] == 0)
+  {
+    // TOTAL BLACKOUT - PUZZLE SOLVED
+  }
+}
+
+void playTool()
+{
+  
 }
 
 // =================================================================================================
@@ -1157,34 +947,18 @@ void showAnimation_Init()
 void showAnimation_Tool()
 {
   // Create the mask corresponding to the pattern
-  maskState = 0x1 | (assignedTool.pattern << 1);
+  byte mask = 0x1 | (assignedTool.pattern << 1);
 
-  switch (assignedTool.type)
+  if (assignedTool.color == COLOR_WHITE)
   {
-    case ToolType_ColorR:
-      colorState[0] = maskState; colorState[1] = 0; colorState[2] = 0;
-      showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
-      break;
-      
-    case ToolType_ColorG:
-      colorState[0] = 0; colorState[1] = maskState; colorState[2] = 0;
-      showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
-      break;
-      
-    case ToolType_ColorB:
-      colorState[0] = 0; colorState[1] = 0; colorState[2] = maskState;
-      showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
-      break;
-
-    case ToolType_Copy:
-    {
-      // Fill in face 0 already since it is assumed
-      colorState[0] = colorState[1] = colorState[2] = 0x1;
-      overlayState[0] = overlayState[1] = overlayState[2] = maskState & 0x3E;
-      showAnimation(ANIM_SEQ_INDEX_COPY, ANIM_RATE_SLOW);
-    }
-      break;
+    colorState[0] = colorState[1] = colorState[2] = mask;
   }
+  else
+  {
+    colorState[0] = 0; colorState[1] = 0; colorState[2] = 0;
+    colorState[assignedTool.color] = mask;
+  }
+  showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
 }
 
 void showAnimation(byte animIndex, byte newAnimRate)
@@ -1346,47 +1120,6 @@ void render()
       else if (faceStateComm->ourState == 3)
       {
         setColorOnFace(BLUE, f);
-      }
-    }
-  }
-#endif
-
-#if SHOW_COMM_QUEUE_LENGTH
-  if (tileRole == TileRole_Target)
-  {
-    FOREACH_FACE(f)
-    {
-      switch (commInsertionIndexes[f])
-      {
-        case 0: setColorOnFace(OFF, f); break;
-        case 1: setColorOnFace(RED, f); break;
-        case 2: setColorOnFace(ORANGE, f); break;
-        case 3: setColorOnFace(YELLOW, f); break;
-      }
-    }
-  }
-#endif
-
-#if SHOW_TOOL_TYPE_BITWISE
-  if (tileRole == TileRole_Tool)
-  {
-    FOREACH_FACE(f)
-    {
-      if (showToolTypeBitwise)
-      {
-        setColorOnFace(OFF, f);
-        if (assignedTool.type & (1<<f))
-        {
-          setColorOnFace(GREEN, f);
-        }
-      }
-      else if (showToolPatternBitwise)
-      {
-        setColorOnFace(OFF, f);
-        if (assignedTool.pattern & (1<<f))
-        {
-          setColorOnFace(YELLOW, f);
-        }
       }
     }
   }
