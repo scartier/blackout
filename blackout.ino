@@ -8,7 +8,7 @@
 #define USE_DATA_SPONGE         0
 #define DEBUG_COMM              0
 #define SHOW_TILE_ID            0
-#define DEBUG_SETUP             1
+#define DEBUG_SETUP             0
 
 #if USE_DATA_SPONGE
 #warning DATA SPONGE ENABLED
@@ -332,6 +332,10 @@ void handleUserInput()
       {
         difficulty = 0;
       }
+
+      byte difficultyOverlay = 0x3F >> (5 - difficulty);
+      overlayState[0] = overlayState[1] = difficultyOverlay; overlayState[2] = 0x0;
+      
       generateToolsAndPuzzle();
     }
   }
@@ -345,7 +349,8 @@ void handleUserInput()
         gameState = GameState_Setup;
   
         colorState[0] = 0; colorState[1] = 0; colorState[2] = 0x3F;
-        showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
+        overlayState[0] = overlayState[1] = 0x1; overlayState[2] = 0x0;
+        showAnimation(ANIM_SEQ_INDEX_BASE_PLUS_OVERLAY, DONT_CARE);
 
         numTargetAndToolTiles = 0;
   
@@ -367,6 +372,8 @@ void handleUserInput()
               enqueueCommOnFace(f, Command_SetGameState, GameState_Play);
             }
           }
+
+          showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
 
           updateWorkingState();
         }
