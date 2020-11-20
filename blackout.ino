@@ -68,6 +68,8 @@ enum Command
   Command_ToolColor,
   
   Command_SetGameState,
+
+  Command_Reset
 };
 
 struct CommandAndData
@@ -237,6 +239,9 @@ byte startingState[3];        // how the puzzle starts
 byte colorState[3];           // the current state displayed
 byte overlayState[3];         // used for animations or to hide things
 
+#define RESET_TIMER_DELAY 3000
+Timer resetTimer;             // prevents cyclic resets
+
 // =================================================================================================
 //
 // SETUP
@@ -339,9 +344,10 @@ void handleUserInput()
         tileRole = TileRole_Working;
         gameState = GameState_Setup;
   
-        // TODO : Start animation
         colorState[0] = 0; colorState[1] = 0; colorState[2] = 0x3F;
         showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
+
+        numTargetAndToolTiles = 0;
   
         // Button clicking provides our entropy for the initial random seed
         randSetSeed(millis());
@@ -382,6 +388,34 @@ void handleUserInput()
         }
         break;
     }
+  }
+
+  // No matter what state we're in, long pressing resets the game and other connected tiles
+  if (buttonLongPressed())
+  {
+    resetGame();
+  }
+}
+
+void resetGame()
+{
+  // Can only reset once every so often to prevent infinite loops
+  if (!resetTimer.isExpired())
+  {
+    return;
+  }
+
+  resetTimer.set(RESET_TIMER_DELAY);
+  
+  gameState = GameState_Init;
+  tileRole = TileRole_Unassigned;
+  assignedTool = { TOOL_PATTERN_UNASSIGNED, 0 };
+  showAnimation_Init();
+
+  // Propagate the reset out to the rest of the cluster
+  FOREACH_FACE(f)
+  {
+    enqueueCommOnFace(f, Command_Reset, DONT_CARE);
   }
 }
 
@@ -621,6 +655,8 @@ void processCommForFace(Command command, byte value, byte f)
       break;
 
     case Command_RequestPattern:
+      // Only the working tile can request Tool info - update the root face
+      rootFace = f;
       if (tileRole == TileRole_Tool)
       {
         enqueueCommOnFace(f, Command_ToolPattern, assignedTool.pattern);
@@ -628,6 +664,8 @@ void processCommForFace(Command command, byte value, byte f)
       break;
       
     case Command_RequestRotation:
+      // Only the working tile can request Tool info - update the root face
+      rootFace = f;
       if (tileRole == TileRole_Tool)
       {
         // We send the face that received this comm so the requester
@@ -637,6 +675,8 @@ void processCommForFace(Command command, byte value, byte f)
       break;
 
     case Command_RequestColor:
+      // Only the working tile can request Tool info - update the root face
+      rootFace = f;
       if (tileRole == TileRole_Tool)
       {
         enqueueCommOnFace(f, Command_ToolColor, assignedTool.color);
@@ -668,6 +708,10 @@ void processCommForFace(Command command, byte value, byte f)
         faceStatesGame[f].neighborTool.color = value;
         updateWorkingState();
       }
+      break;
+
+    case Command_Reset:
+      resetGame();
       break;
   }
 }
