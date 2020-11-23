@@ -1,22 +1,30 @@
-// FACTORY BLINKS
+// BLACKOUT!
 // (c) 2020 Scott Cartier
 
 #define null 0
 #define DONT_CARE 0
 
 // Defines to enable debug code
+#define RENDER_DEBUG_AND_ERRORS 1
 #define USE_DATA_SPONGE         0
-#define DEBUG_COMM              0
-#define SHOW_TILE_ID            0
 #define DEBUG_SETUP             0
+#define DEBUG_AUTO_WIN          0
 
 #if USE_DATA_SPONGE
 #warning DATA SPONGE ENABLED
-byte sponge[26];
+byte sponge[28];
 #endif
 // SPONGE LOG
+// 11/22: Setup & win animations: 25
+// 11/21: Added an animation timer per-face instead of per-tile
+// 11/20: Changed to Blackout! which removed all the tool patterns and difficulty structures: 70-75
 // 11/3: 48, 39
 // 11/10: 25
+
+
+void __attribute__((noinline)) showAnimation(byte animIndex, byte newAnimRate);
+byte __attribute__((noinline)) randRange(byte min, byte max);
+
 
 byte faceOffsetArray[] = { 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5 };
 
@@ -39,21 +47,12 @@ struct FaceStateComm
   byte lastCommandIn;
   bool neighborPresent;
   bool debug;
-
-#if DEBUG_COMM
-  byte ourState;
-  byte neighborState;
-#endif
 };
 FaceStateComm faceStatesComm[FACE_COUNT];
 
 enum Command
 {
   Command_None,         // no data
-
-#if DEBUG_COMM
-  Command_UpdateState,  // data=value
-#endif
 
   // Setup
   Command_AssignRole,         // Working tile assigns roles to neighbors
@@ -69,6 +68,7 @@ enum Command
   
   Command_SetGameState,
 
+  Command_PuzzleSolved,
   Command_Reset
 };
 
@@ -89,11 +89,6 @@ byte numNeighbors = 0;
 
 #define ErrorOnFace(f) (commInsertionIndexes[f] > COMM_QUEUE_SIZE)
 
-#if DEBUG_COMM
-// Timer used to toggle between green & blue
-Timer sendNewStateTimer;
-#endif
-
 // -------------------------------------------------------------------------------------------------
 // TILES
 // -------------------------------------------------------------------------------------------------
@@ -101,7 +96,6 @@ Timer sendNewStateTimer;
 enum TileRole
 {
   TileRole_Unassigned,
-//  TileRole_Target,
   TileRole_Working,
   TileRole_Tool
 };
@@ -133,7 +127,7 @@ byte patterns[] =
   0b0111,   // 4
   0b1011,
   0b1101,
-  0b1111    // 5
+  0b1111    // 5 (unused)
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -142,16 +136,19 @@ byte patterns[] =
 
 enum AnimCommand
 {
-  AnimCommand_Solid,
+  AnimCommand_SolidBase,
+  AnimCommand_SolidOverlay,
   AnimCommand_SolidWithOverlay,
   AnimCommand_BaseAndOverlay,
   AnimCommand_LerpBaseToOverlay,
   AnimCommand_LerpOverlayToBase,
   AnimCommand_Pause,
+  AnimCommand_PauseHalf,
   AnimCommand_FadeInBase,
   AnimCommand_FadeOutBase,
-  AnimCommand_FadeOutOverlay,
-  AnimCommand_Loop
+//  AnimCommand_FadeOutOverlay,
+  AnimCommand_Loop,
+  AnimCommand_Done
 };
 
 // Start each face at a different command
@@ -166,36 +163,35 @@ AnimCommand animSequences[] =
   AnimCommand_Pause,
   AnimCommand_Loop,
 
-  // PULSE
-  AnimCommand_LerpBaseToOverlay,
-  AnimCommand_LerpOverlayToBase,
-  AnimCommand_Loop,
-
-  // COPY
-  AnimCommand_FadeInBase,
-  AnimCommand_LerpBaseToOverlay,
-  AnimCommand_FadeOutOverlay,
-  AnimCommand_Pause,
-  AnimCommand_Loop,
-
   // CONSTANT COLOR - BASE ONLY
-  AnimCommand_Solid,
+  AnimCommand_SolidBase,
   AnimCommand_Loop,
 
   // CONSTANT COLOR - BASE IF NO OVERLAY
   AnimCommand_SolidWithOverlay,     // used on Target tile during Setup phase
   AnimCommand_Loop,
+
+  // OVERLAY TO BASE - one shot
+  AnimCommand_SolidOverlay,
+  AnimCommand_PauseHalf,
+  AnimCommand_LerpOverlayToBase,
+  AnimCommand_SolidBase,
+  AnimCommand_Done,
 };
 
-#define ANIM_SEQ_INDEX_SPIN     0
-#define ANIM_SEQ_INDEX_PULSE    7
-#define ANIM_SEQ_INDEX_COPY     10
-#define ANIM_SEQ_INDEX_BASE     15
-#define ANIM_SEQ_INDEX_BASE_PLUS_OVERLAY  17
+#define ANIM_SEQ_INDEX__SPIN                    0
+#define ANIM_SEQ_INDEX__BASE                    7
+#define ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY       9
+#define ANIM_SEQ_INDEX__OVERLAY_TO_BASE_DELAYED 11
+#define ANIM_SEQ_INDEX__OVERLAY_TO_BASE         13
 
 // Shift by 2 so it fits in a byte
 #define ANIM_RATE_SLOW (1000>>2)
 #define ANIM_RATE_FAST (300>>2)
+
+
+byte rainbowSequence[] = { 1, 3, 2, 6, 4, 5 };
+byte rainbowIndex = 0;
 
 // -------------------------------------------------------------------------------------------------
 // GAME
@@ -205,34 +201,34 @@ enum GameState
 {
   GameState_Init,     // tiles were just programmed - waiting for click of Target tile
   GameState_Setup,    // let player choose number of tool tiles and difficulty
-//  GameState_Detach,   // detach the tool tiles from working tile before the pattern is revealed
   GameState_Play,     // gameplay
   GameState_Done      // player matched the Target tile
 };
 
 GameState gameState = GameState_Init;
-byte numTargetAndToolTiles = 0;
+byte numToolTiles = 0;
 
 #define NUM_DIFFICULTY_LEVELS 6
 byte difficulty = 0;
 
 uint32_t startingSeed = 0;
 
-byte rootFace = 0;  // used during setup for Tool tiles to know which face is the Target tile
-
-#define MAX_TOOL_TILES 6
+byte rootFace = 0;  // so Tool tiles to know which face is the Target tile
 
 struct FaceStateGame
 {
   byte animIndexStart;
   byte animIndexCur;
+  byte animRateDiv4;            // lerp/pause rate
+  Timer animTimer;              // timer used for lerps and pauses during animation
+  bool animDone;
+
+  uint16_t savedColor;          // used during pauses in animation
 
   // Used during setup
   ToolState neighborTool;
 };
 FaceStateGame faceStatesGame[FACE_COUNT];
-uint32_t animRate;            // lerp/pause rate
-Timer animTimer;              // timer used for lerps and pauses during animation
 
 // Store our current puzzle state
 byte startingState[3];        // how the puzzle starts
@@ -241,6 +237,12 @@ byte overlayState[3];         // used for animations or to hide things
 
 #define RESET_TIMER_DELAY 3000
 Timer resetTimer;             // prevents cyclic resets
+
+uint32_t randState = 0;
+
+#if DEBUG_AUTO_WIN
+bool autoWin = false;
+#endif
 
 // =================================================================================================
 //
@@ -285,21 +287,8 @@ void loop()
     case GameState_Init:  break; // do nothing - waiting for click in handleUserInput()
     case GameState_Setup: loopSetup();  break;
     case GameState_Play:  loopPlay();   break;
-    case GameState_Done:  break;
+    case GameState_Done:  loopDone();   break;
   }
-
-#if DEBUG_COMM
-  if (sendNewStateTimer.isExpired())
-  {
-    FOREACH_FACE(f)
-    {
-      byte nextVal = faceStatesComm[f].neighborState == 2 ? 3 : 2;
-      faceStatesComm[f].neighborState = nextVal;
-      enqueueCommOnFace(f, Command_UpdateState, nextVal);
-    }
-    sendNewStateTimer.set(500);
-  }
-#endif
 
   render();
 
@@ -313,30 +302,41 @@ void loop()
 //
 // =================================================================================================
 
+void __attribute__((noinline)) updateDifficulty(byte newDifficulty)
+{
+  difficulty = newDifficulty;
+  if (difficulty >= NUM_DIFFICULTY_LEVELS)
+  {
+    difficulty = 0;
+  }
+
+  byte difficultyOverlay = 0x3F >> (5 - difficulty);
+  overlayState[0] = overlayState[1] = difficultyOverlay; overlayState[2] = 0x0;
+  
+  generateToolsAndPuzzle();
+}
+
 void handleUserInput()
 {
+#if DEBUG_AUTO_WIN
   if (buttonMultiClicked())
   {
     byte clicks = buttonClickCount();
-    if (clicks == 4)
+    if (clicks == 5)
     {
+      if (tileRole == TileRole_Working)
+      {
+        autoWin = true;
+      }
     }
   }
+#endif
 
   if (buttonDoubleClicked())
   {
     if (gameState == GameState_Setup && tileRole == TileRole_Working)
     {
-      difficulty++;
-      if (difficulty >= NUM_DIFFICULTY_LEVELS)
-      {
-        difficulty = 0;
-      }
-
-      byte difficultyOverlay = 0x3F >> (5 - difficulty);
-      overlayState[0] = overlayState[1] = difficultyOverlay; overlayState[2] = 0x0;
-      
-      generateToolsAndPuzzle();
+      updateDifficulty(difficulty + 1);
     }
   }
 
@@ -347,16 +347,22 @@ void handleUserInput()
       case GameState_Init:
         tileRole = TileRole_Working;
         gameState = GameState_Setup;
-  
-        colorState[0] = 0; colorState[1] = 0; colorState[2] = 0x3F;
-        overlayState[0] = overlayState[1] = 0x1; overlayState[2] = 0x0;
-        showAnimation(ANIM_SEQ_INDEX_BASE_PLUS_OVERLAY, DONT_CARE);
 
-        numTargetAndToolTiles = 0;
+        colorState[0] = 0; colorState[1] = 0; colorState[2] = 0x3F;
+        showAnimation(ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY, DONT_CARE);
+
+        updateDifficulty(difficulty); // called to update the faces to show the current difficulty
+
+        // Clear this so the Working tile will re-detect
+        numToolTiles = 0;
   
         // Button clicking provides our entropy for the initial random seed
-        randSetSeed(millis());
+        randState = millis();
         generateNewStartingSeed();
+
+#if DEBUG_AUTO_WIN
+        autoWin = false;
+#endif
         break;
 
       case GameState_Setup:
@@ -373,7 +379,8 @@ void handleUserInput()
             }
           }
 
-          showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
+          overlayState[0] = overlayState[1] = 0x3F; overlayState[2] = 0x0;
+          showAnimation(ANIM_SEQ_INDEX__OVERLAY_TO_BASE, ANIM_RATE_FAST);
 
           updateWorkingState();
         }
@@ -394,6 +401,10 @@ void handleUserInput()
           enqueueCommOnFace(rootFace, Command_ToolColor, assignedTool.color);
         }
         break;
+
+      case GameState_Done:
+        resetGame();
+        break;
     }
   }
 
@@ -402,6 +413,14 @@ void handleUserInput()
   {
     resetGame();
   }
+}
+
+void __attribute__((noinline)) resetTileState()
+{
+  gameState = GameState_Init;
+  tileRole = TileRole_Unassigned;
+  assignedTool = { TOOL_PATTERN_UNASSIGNED, 0 };
+  showAnimation_Init();
 }
 
 void resetGame()
@@ -413,13 +432,10 @@ void resetGame()
   }
 
   resetTimer.set(RESET_TIMER_DELAY);
-  
-  gameState = GameState_Init;
-  tileRole = TileRole_Unassigned;
-  assignedTool = { TOOL_PATTERN_UNASSIGNED, 0 };
-  showAnimation_Init();
 
-  // Propagate the reset out to the rest of the cluster
+  resetTileState();
+  
+  // Propagate the reset out to the cluster
   FOREACH_FACE(f)
   {
     enqueueCommOnFace(f, Command_Reset, DONT_CARE);
@@ -431,6 +447,12 @@ void resetGame()
 // COMMUNICATIONS
 //
 // =================================================================================================
+
+void __attribute__((noinline)) sendValueOnFace(byte f, FaceValue faceValue)
+{
+  byte outVal = *((byte*)&faceValue);
+  setValueSentOnFace(outVal, f);
+}
 
 void resetCommOnFace(byte f)
 {
@@ -447,21 +469,6 @@ void resetCommOnFace(byte f)
   faceStatesComm[f].faceValueOut.toggle = TOGGLE_DATA;
   faceStatesComm[f].faceValueOut.ack = TOGGLE_DATA;
   sendValueOnFace(f, faceStatesComm[f].faceValueOut);
-}
-
-void resetCommQueueOnFace(byte f)
-{
-  // Kill all commands except the active one at index 0 since it might be in progress
-  if (commInsertionIndexes[f] > 0)
-  {
-    commInsertionIndexes[f] = 1;
-  }
-}
-
-void sendValueOnFace(byte f, FaceValue faceValue)
-{
-  byte outVal = *((byte*)&faceValue);
-  setValueSentOnFace(outVal, f);
 }
 
 // Called by the main program when this tile needs to tell something to
@@ -619,14 +626,6 @@ void processCommForFace(Command command, byte value, byte f)
   //faceStateComm->debug = true;
   switch (command)
   {
-#if DEBUG_COMM
-    // YOUR STUFF GOES HERE
-    // For now, just save the value that was sent
-    case Command_UpdateState:
-      faceStateComm->ourState = value;
-      break;
-#endif
-
     case Command_AssignRole:
       // Grab our new role
       tileRole = (TileRole) value;
@@ -635,7 +634,7 @@ void processCommForFace(Command command, byte value, byte f)
       if (tileRole == TileRole_Tool)
       {
         colorState[0] = colorState[1] = colorState[2] = 0x3F;
-        showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
+        showAnimation(ANIM_SEQ_INDEX__BASE, DONT_CARE);
       }
       break;
 
@@ -647,6 +646,8 @@ void processCommForFace(Command command, byte value, byte f)
 #if DEBUG_SETUP
         showAnimation_Tool();
 #endif
+        // Send our rotation in case Working tile doesn't have it
+        enqueueCommOnFace(f, Command_ToolRotation, f);
       }
       break;
       
@@ -657,6 +658,9 @@ void processCommForFace(Command command, byte value, byte f)
         if (gameState == GameState_Play)
         {
           showAnimation_Tool();
+          
+          overlayState[0] = overlayState[1] = 0x3F; overlayState[2] = 0x0;
+          showAnimation_BurstOutward(f);
         }
       }
       break;
@@ -675,8 +679,7 @@ void processCommForFace(Command command, byte value, byte f)
       rootFace = f;
       if (tileRole == TileRole_Tool)
       {
-        // We send the face that received this comm so the requester
-        // can compute our relative rotation
+        // We send the face that received this comm so the requester can compute our relative rotation
         enqueueCommOnFace(f, Command_ToolRotation, f);
       }
       break;
@@ -705,7 +708,10 @@ void processCommForFace(Command command, byte value, byte f)
         byte oppositeFace = OPPOSITE_FACE(value);
         char offset = f - oppositeFace;
         faceStatesGame[f].neighborTool.rotation = (offset < 0) ? (offset + 6) : offset;
-        enqueueCommOnFace(f, Command_RequestColor, DONT_CARE);
+        if (gameState == GameState_Play)
+        {
+          enqueueCommOnFace(f, Command_RequestColor, DONT_CARE);
+        }
       }
       break;
       
@@ -717,6 +723,15 @@ void processCommForFace(Command command, byte value, byte f)
       }
       break;
 
+    case Command_PuzzleSolved:
+      if (tileRole == TileRole_Tool)
+      {
+        gameState = GameState_Done;
+        setupNextRainbowColor(value);
+        showAnimation_BurstOutward(f);
+      }
+      break;
+      
     case Command_Reset:
       resetGame();
       break;
@@ -745,8 +760,11 @@ void loopSetup()
 
 void setupWorking()
 {
-  if (numNeighbors != numTargetAndToolTiles)
+  // Check if a neighbor tile was added or removed
+  if (numNeighbors != numToolTiles)
   {
+    numToolTiles = numNeighbors;
+    
     // Generate the tools and the puzzle based on them
     if (numNeighbors > 1)
     {
@@ -759,18 +777,16 @@ void generateToolsAndPuzzle()
 {
   // Generate a puzzle based on the difficulty, number of tool tiles, and random seed
 
-  numTargetAndToolTiles = numNeighbors;
-
   // Nibble 4 (19:16) represents sixteen different puzzles using the same tools
   // It needs to be part of the starting seed so it can be shown to the player,
   // but we don't want it to factor into the seed for tool selection because tools
   // shouldn't change based on it.
 
   uint32_t puzzleSeed = startingSeed;
-  puzzleSeed |= (uint32_t) numTargetAndToolTiles << 24;
+  puzzleSeed |= (uint32_t) numToolTiles << 24;
   puzzleSeed |= (uint32_t) difficulty << 28;
 
-  byte toolSlotIndex = 0;
+  byte toolSlotIndex = randRange(0, 6 - numToolTiles + 2);
   FOREACH_FACE(f)
   {
     if (!faceStatesComm[f].neighborPresent)
@@ -778,7 +794,7 @@ void generateToolsAndPuzzle()
       continue;
     }
 
-    // Choose the tools sequentially
+    // Choose the tools sequentially, but start from a random tool if less than six neighbors
     faceStatesGame[f].neighborTool.pattern = patterns[difficulty+toolSlotIndex];
 
     // Make it a Tool tile
@@ -790,7 +806,7 @@ void generateToolsAndPuzzle()
   }
 
   // Now that we're generating the actual puzzle, use a seed that includes [19:16]
-  randSetSeed(puzzleSeed);
+  randState = puzzleSeed;
 
   // Fill up the starting state with our tools
   startingState[0] = startingState[1] = startingState[2] = 0;
@@ -821,7 +837,7 @@ void generateToolsAndPuzzle()
   colorState[0] = startingState[0];
   colorState[1] = startingState[1];
   colorState[2] = startingState[2];
-  showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
+  showAnimation(ANIM_SEQ_INDEX__BASE, DONT_CARE);
 #endif
 }
 
@@ -880,11 +896,7 @@ void setupTool()
   // If we disconnected from the Target tile then clear our role
   if (!faceStatesComm[rootFace].neighborPresent)
   {
-    gameState = GameState_Init;
-    tileRole = TileRole_Unassigned;
-    assignedTool = { TOOL_PATTERN_UNASSIGNED, 0 };
-
-    showAnimation_Init();
+    resetTileState();
   }
 }
 
@@ -899,16 +911,15 @@ void loopPlay()
   switch (tileRole)
   {
     case TileRole_Working:  playWorking(); break;
-    case TileRole_Tool:     playTool(); break;
   }
 }
 
 void playWorking()
 {
   // Check for a Tool added or removed
-  if (numNeighbors != numTargetAndToolTiles)
+  if (numNeighbors != numToolTiles)
   {
-    numTargetAndToolTiles = numNeighbors;
+    numToolTiles = numNeighbors;
 
     FOREACH_FACE(f)
     {
@@ -919,7 +930,8 @@ void playWorking()
           // Give the tool a pattern so that it doesn't fall in here again, but make it WHITE so it doesn't get drawn yet
           faceStatesGame[f].neighborTool.pattern = 0;
           faceStatesGame[f].neighborTool.color = COLOR_WHITE;
-          
+
+          // Start requesting the Tool info - pattern, rotation, color
           enqueueCommOnFace(f, Command_RequestPattern, DONT_CARE);
         }
       }
@@ -933,16 +945,71 @@ void playWorking()
     updateWorkingState();
   }
 
+#if DEBUG_AUTO_WIN
+  if (autoWin)
+  {
+    autoWin = false;
+    colorState[0] = colorState[1] = colorState[2] = 0;
+  }
+#endif
+  
   // Check for win state
   if (colorState[0] == 0 && colorState[1] == 0 && colorState[2] == 0)
   {
     // TOTAL BLACKOUT - PUZZLE SOLVED
+    gameState = GameState_Done;
+    rainbowIndex = 0;
   }
 }
 
-void playTool()
+// =================================================================================================
+//
+// GAME STATE: DONE
+//
+// =================================================================================================
+
+void loopDone()
 {
-  
+  switch (tileRole)
+  {
+    case TileRole_Working:  doneWorking(); break;
+  }
+}
+
+void doneWorking()
+{
+  // CELEBRATORY ANIMATION!
+  FOREACH_FACE(f)
+  {
+    // Wait for all faces to finish their anims
+    if (!faceStatesGame[f].animDone)
+    {
+      return;
+    }
+  }
+
+  // Start our next color and tell neighbors to start theirs
+  setupNextRainbowColor(rainbowSequence[rainbowIndex]);
+  showAnimation(ANIM_SEQ_INDEX__OVERLAY_TO_BASE, ANIM_RATE_FAST);
+  FOREACH_FACE(f)
+  {
+    enqueueCommOnFace(f, Command_PuzzleSolved, rainbowSequence[rainbowIndex]);
+  }
+  rainbowIndex++;
+  if (rainbowIndex > 5)
+  {
+    rainbowIndex = 0;
+  }
+}
+
+void setupNextRainbowColor(byte value)
+{
+  overlayState[0] = colorState[0];
+  overlayState[1] = colorState[1];
+  overlayState[2] = colorState[2];
+  colorState[0] = (value & 0x1) ? 0x3F : 0;
+  colorState[1] = (value & 0x2) ? 0x3F : 0;
+  colorState[2] = (value & 0x4) ? 0x3F : 0;
 }
 
 // =================================================================================================
@@ -953,14 +1020,7 @@ void playTool()
 
 // Random code partially copied from blinklib because there's no function
 // to set an explicit seed, which we need so we can share/replay puzzles.
-uint32_t randState = 0;
-
-void randSetSeed(uint32_t newSeed)
-{
-  randState = newSeed;
-}
-
-byte randGetByte()
+byte __attribute__((noinline)) randGetByte()
 {
   // Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
   uint32_t x = randState;
@@ -971,7 +1031,7 @@ byte randGetByte()
   return x & 0xFF;
 }
 
-byte randRange(byte min, byte max)
+byte __attribute__((noinline)) randRange(byte min, byte max)
 {
   uint32_t val = randGetByte();
   uint32_t range = max - min;
@@ -997,11 +1057,25 @@ void generateNewStartingSeed()
 void showAnimation_Init()
 {
   colorState[0] = colorState[1] = colorState[2] = 0x3F;
-  showAnimation(ANIM_SEQ_INDEX_SPIN, ANIM_RATE_SLOW);
+  showAnimation(ANIM_SEQ_INDEX__SPIN, ANIM_RATE_SLOW);
   
   FOREACH_FACE(f)
   {
-    faceStatesGame[f].animIndexCur = ANIM_SEQ_INDEX_SPIN + f;
+    faceStatesGame[f].animIndexCur += f;
+  }
+}
+
+void showAnimation_BurstOutward(byte f)
+{
+  showAnimation(ANIM_SEQ_INDEX__OVERLAY_TO_BASE, ANIM_RATE_FAST);
+  
+  FOREACH_FACE(offset)
+  {
+    if (offset >= 2 && offset <= 4)
+    {
+      byte face = CW_FROM_FACE(f, offset);
+      faceStatesGame[face].animIndexCur -= 2;
+    }
   }
 }
 
@@ -1019,17 +1093,18 @@ void showAnimation_Tool()
     colorState[0] = 0; colorState[1] = 0; colorState[2] = 0;
     colorState[assignedTool.color] = mask;
   }
-  showAnimation(ANIM_SEQ_INDEX_BASE, DONT_CARE);
+  showAnimation(ANIM_SEQ_INDEX__BASE, DONT_CARE);
 }
 
-void showAnimation(byte animIndex, byte newAnimRate)
+void __attribute__((noinline)) showAnimation(byte animIndex, byte newAnimRate)
 {
   FOREACH_FACE(f)
   {
     faceStatesGame[f].animIndexStart = faceStatesGame[f].animIndexCur = animIndex;
+    faceStatesGame[f].animRateDiv4 = newAnimRate;
+    faceStatesGame[f].animTimer.set(faceStatesGame[f].animRateDiv4 << 2);
+    faceStatesGame[f].animDone = false;
   }
-  animRate = newAnimRate<<2;
-  animTimer.set(animRate);
 }
 
 // =================================================================================================
@@ -1038,19 +1113,14 @@ void showAnimation(byte animIndex, byte newAnimRate)
 //
 // =================================================================================================
 
-void lerpColors(byte inR1, byte inG1, byte inB1, byte inR2, byte inG2, byte inB2, byte *outRGB, byte t)
+byte __attribute__((noinline)) lerpColor(byte in1, byte in2, byte t)
 {
   uint32_t temp;
-
-  temp = inR1 * (128 - t) + inR2 * t;
-  outRGB[0] = temp >> 7;
-  temp = inG1 * (128 - t) + inG2 * t;
-  outRGB[1] = temp >> 7;
-  temp = inB1 * (128 - t) + inB2 * t;
-  outRGB[2] = temp >> 7;
+  temp = in1 * (128 - t) + in2 * t;
+  return temp >> 7;
 }
 
-byte getColorFromState(byte state, byte bitOffset)
+byte __attribute__((noinline)) getColorFromState(byte state, byte bitOffset)
 {
   byte colorBit = state >> bitOffset;
   char colorByte = colorBit << 7;
@@ -1071,15 +1141,23 @@ void renderAnimationStateOnFace(byte f)
   byte overlayB = getColorFromState(overlayState[2], f);
   
   byte colorRGB[3];
-  bool startNextCommand = false;
-  bool paused = false;
-  uint32_t t = (128 * (animRate - animTimer.getRemaining())) / animRate;  // 128 = 1.0
+  byte paused = false;  
+  bool startNextCommand = faceStateGame->animTimer.isExpired();
+  uint32_t animRate32 = (uint32_t) faceStateGame->animRateDiv4 << 2;
+  uint32_t t = (128 * (animRate32 - faceStateGame->animTimer.getRemaining())) / animRate32;  // 128 = 1.0
   switch (animSequences[faceStateGame->animIndexCur])
   {
-    case AnimCommand_Solid:
+    case AnimCommand_SolidBase:
       colorRGB[0] = r;
       colorRGB[1] = g;
       colorRGB[2] = b;
+      startNextCommand = true;
+      break;
+
+    case AnimCommand_SolidOverlay:
+      colorRGB[0] = overlayR;
+      colorRGB[1] = overlayG;
+      colorRGB[2] = overlayB;
       startNextCommand = true;
       break;
 
@@ -1096,36 +1174,40 @@ void renderAnimationStateOnFace(byte f)
     case AnimCommand_LerpOverlayToBase:
       t = 128 - t;
     case AnimCommand_LerpBaseToOverlay:
-      lerpColors(r, g, b, overlayR, overlayG, overlayB, colorRGB, t);
+      colorRGB[0] = lerpColor(r, overlayR, t);
+      colorRGB[1] = lerpColor(g, overlayG, t);
+      colorRGB[2] = lerpColor(b, overlayB, t);
       break;
 
     case AnimCommand_Pause:
+    case AnimCommand_PauseHalf:
       paused = true;
       break;
 
-    case AnimCommand_FadeInBase:
-      lerpColors(0, 0, 0, r, g, b, colorRGB, t);
-      break;
-      
     case AnimCommand_FadeOutBase:
-      lerpColors(r, g, b, 0, 0, 0, colorRGB, t);
+      t = 128 - t;
+    case AnimCommand_FadeInBase:
+      colorRGB[0] = lerpColor(0, r, t);
+      colorRGB[1] = lerpColor(0, g, t);
+      colorRGB[2] = lerpColor(0, b, t);
       break;
-      
+
+   /*   
     case AnimCommand_FadeOutOverlay:
-      lerpColors(overlayR, overlayG, overlayB, 0, 0, 0, colorRGB, t);
+      colorRGB[0] = lerpColor(overlayR, 0, t);
+      colorRGB[1] = lerpColor(overlayG, 0, t);
+      colorRGB[2] = lerpColor(overlayB, 0, t);
       break;
+      */
   }
 
-  if (animTimer.isExpired())
+  Color color = makeColorRGB(colorRGB[0], colorRGB[1], colorRGB[2]);
+  if (paused)
   {
-    startNextCommand = true;
+    color.as_uint16 = faceStateGame->savedColor;
   }
-  
-  if (!paused)
-  {
-    Color color = makeColorRGB(colorRGB[0], colorRGB[1], colorRGB[2]);
-    setColorOnFace(color, f);
-  }
+  faceStateGame->savedColor = color.as_uint16;
+  setColorOnFace(color, f);
 
   if (startNextCommand)
   {
@@ -1136,12 +1218,18 @@ void renderAnimationStateOnFace(byte f)
     {
       faceStateGame->animIndexCur = faceStateGame->animIndexStart;
     }
-
-    // Start timer for next command, but only after done processing all faces
-    if (f == 5)
+    else if (animSequences[faceStateGame->animIndexCur] == AnimCommand_Done)
     {
-      animTimer.set(animRate);
+      faceStateGame->animIndexCur--;
+      faceStateGame->animDone = true;
+    }    
+
+    // Start timer for next command
+    if (animSequences[faceStateGame->animIndexCur] == AnimCommand_PauseHalf)
+    {
+      animRate32 >>= 1;
     }
+    faceStateGame->animTimer.set(animRate32);
   }
 
 }
@@ -1154,38 +1242,8 @@ void render()
   {
     renderAnimationStateOnFace(f);
   }
-  
-#if SHOW_TILE_ID
-  if (tileRole == TileRole_Tool)
-  {
-    setColorOnFace(RED, 0);
-    setColorOnFace(GREEN, 1);
-    setColorOnFace(tileId & 0x1 ? WHITE : OFF, 2);
-    setColorOnFace(tileId & 0x2 ? WHITE : OFF, 3);
-    setColorOnFace(tileId & 0x4 ? WHITE : OFF, 4);
-    setColorOnFace(tileId & 0x8 ? WHITE : OFF, 5);
-  }
-#endif
 
-#if DEBUG_COMM
-  FOREACH_FACE(f)
-  {
-    FaceStateComm *faceStateComm = &faceStatesComm[f];
-
-    if (!isValueReceivedOnFaceExpired(f))
-    {
-      if (faceStateComm->ourState == 2)
-      {
-        setColorOnFace(GREEN, f);
-      }
-      else if (faceStateComm->ourState == 3)
-      {
-        setColorOnFace(BLUE, f);
-      }
-    }
-  }
-#endif
-
+#if RENDER_DEBUG_AND_ERRORS
   FOREACH_FACE(f)
   {
     if (faceStatesComm[f].debug)
@@ -1214,4 +1272,5 @@ void render()
       }
     }
   }
+#endif
 }
