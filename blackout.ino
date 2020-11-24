@@ -145,6 +145,7 @@ enum AnimCommand
   AnimCommand_SolidBase,
   AnimCommand_SolidOverlay,
   AnimCommand_SolidWithOverlay,
+  AnimCommand_SolidOff,
   AnimCommand_BaseAndOverlay,
   AnimCommand_LerpBaseToOverlay,
   AnimCommand_LerpOverlayToBase,
@@ -161,12 +162,18 @@ enum AnimCommand
 // Start each face at a different command
 AnimCommand animSequences[] =
 {
-  // SPIN
+  // INIT
+  AnimCommand_SolidOff,
   AnimCommand_FadeInBase,
+  AnimCommand_SolidBase,
+  AnimCommand_Pause,
+  AnimCommand_SolidBase,
+  AnimCommand_Pause,
+  AnimCommand_SolidBase,
   AnimCommand_FadeOutBase,
+  AnimCommand_SolidOff,
   AnimCommand_Pause,
-  AnimCommand_Pause,
-  AnimCommand_Pause,
+  AnimCommand_SolidOff,
   AnimCommand_Pause,
   AnimCommand_Loop,
 
@@ -192,12 +199,12 @@ AnimCommand animSequences[] =
   AnimCommand_Done,
 };
 
-#define ANIM_SEQ_INDEX__SPIN                    0
-#define ANIM_SEQ_INDEX__BASE                    7
-#define ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY       9
-#define ANIM_SEQ_INDEX__OVERLAY_TO_BASE_DELAYED 11
-#define ANIM_SEQ_INDEX__OVERLAY_TO_BASE         13
-#define ANIM_SEQ_INDEX__STATE_CHANGED           16
+#define ANIM_SEQ_INDEX__INIT                    0
+#define ANIM_SEQ_INDEX__BASE                    (ANIM_SEQ_INDEX__INIT+13)
+#define ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY       (ANIM_SEQ_INDEX__BASE+2)
+#define ANIM_SEQ_INDEX__OVERLAY_TO_BASE_DELAYED (ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY+2)
+#define ANIM_SEQ_INDEX__OVERLAY_TO_BASE         (ANIM_SEQ_INDEX__OVERLAY_TO_BASE_DELAYED+2)
+#define ANIM_SEQ_INDEX__STATE_CHANGED           (ANIM_SEQ_INDEX__OVERLAY_TO_BASE_DELAYED+5)
 
 // Shift by 2 so it fits in a byte
 #define ANIM_RATE_SLOW (1000>>2)
@@ -1091,11 +1098,11 @@ void generateNewStartingSeed()
 void showAnimation_Init()
 {
   setSolidColorOnState(0b111, colorState);
-  showAnimation(ANIM_SEQ_INDEX__SPIN, ANIM_RATE_SLOW);
-  
+  showAnimation(ANIM_SEQ_INDEX__INIT, ANIM_RATE_SLOW);
+
   FOREACH_FACE(f)
   {
-    faceStatesGame[f].animIndexCur += f;
+    faceStatesGame[f].animIndexCur += f * 2;
   }
 }
 
@@ -1213,6 +1220,11 @@ void renderAnimationStateOnFace(byte f)
     }
       break;
 
+    case AnimCommand_SolidOff:
+      colorRGB[0] = colorRGB[1] = colorRGB[2] = 0;
+      startNextCommand = true;
+      break;
+
     case AnimCommand_LerpOverlayIfNonZeroToBase:
       if (!overlayNonZero)
       {
@@ -1241,14 +1253,6 @@ void renderAnimationStateOnFace(byte f)
       colorRGB[1] = lerpColor(0, g, t);
       colorRGB[2] = lerpColor(0, b, t);
       break;
-
-   /*   
-    case AnimCommand_FadeOutOverlay:
-      colorRGB[0] = lerpColor(overlayR, 0, t);
-      colorRGB[1] = lerpColor(overlayG, 0, t);
-      colorRGB[2] = lerpColor(overlayB, 0, t);
-      break;
-      */
   }
 
   Color color = makeColorRGB(colorRGB[0], colorRGB[1], colorRGB[2]);
