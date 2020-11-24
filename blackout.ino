@@ -5,10 +5,11 @@
 #define DONT_CARE 0
 
 // Defines to enable debug code
-#define RENDER_DEBUG_AND_ERRORS 1
+#define RENDER_DEBUG_AND_ERRORS 0
 #define USE_DATA_SPONGE         0
 #define DEBUG_SETUP             0
 #define DEBUG_AUTO_WIN          0
+
 
 #if USE_DATA_SPONGE
 #warning DATA SPONGE ENABLED
@@ -24,6 +25,9 @@ byte sponge[28];
 
 void __attribute__((noinline)) showAnimation(byte animIndex, byte newAnimRate);
 byte __attribute__((noinline)) randRange(byte min, byte max);
+void __attribute__((noinline)) setSolidColorOnState(byte color, byte *state);
+void __attribute__((noinline)) updateToolColor(byte color);
+void __attribute__((noinline)) resetGame();
 
 
 byte faceOffsetArray[] = { 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5 };
@@ -71,6 +75,8 @@ enum Command
   Command_PuzzleSolved,
   Command_Reset
 };
+
+void __attribute__((noinline)) enqueueCommOnFace(byte f, Command command, byte data);
 
 struct CommandAndData
 {
@@ -142,6 +148,7 @@ enum AnimCommand
   AnimCommand_BaseAndOverlay,
   AnimCommand_LerpBaseToOverlay,
   AnimCommand_LerpOverlayToBase,
+  AnimCommand_LerpOverlayIfNonZeroToBase,
   AnimCommand_Pause,
   AnimCommand_PauseHalf,
   AnimCommand_FadeInBase,
@@ -177,6 +184,12 @@ AnimCommand animSequences[] =
   AnimCommand_LerpOverlayToBase,
   AnimCommand_SolidBase,
   AnimCommand_Done,
+
+  // PUZZLE STATE CHANGED
+  AnimCommand_SolidWithOverlay,
+  AnimCommand_LerpOverlayIfNonZeroToBase,
+  AnimCommand_SolidBase,
+  AnimCommand_Done,
 };
 
 #define ANIM_SEQ_INDEX__SPIN                    0
@@ -184,6 +197,7 @@ AnimCommand animSequences[] =
 #define ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY       9
 #define ANIM_SEQ_INDEX__OVERLAY_TO_BASE_DELAYED 11
 #define ANIM_SEQ_INDEX__OVERLAY_TO_BASE         13
+#define ANIM_SEQ_INDEX__STATE_CHANGED           16
 
 // Shift by 2 so it fits in a byte
 #define ANIM_RATE_SLOW (1000>>2)
@@ -234,6 +248,7 @@ FaceStateGame faceStatesGame[FACE_COUNT];
 byte startingState[3];        // how the puzzle starts
 byte colorState[3];           // the current state displayed
 byte overlayState[3];         // used for animations or to hide things
+byte prevState[3];            // the previous color state for comparisons
 
 #define RESET_TIMER_DELAY 3000
 Timer resetTimer;             // prevents cyclic resets
@@ -338,6 +353,10 @@ void handleUserInput()
     {
       updateDifficulty(difficulty + 1);
     }
+    else if (gameState == GameState_Play && tileRole == TileRole_Tool)
+    {
+      updateToolColor(COLOR_WHITE);
+    }
   }
 
   if (buttonSingleClicked() && !hasWoken())
@@ -348,7 +367,7 @@ void handleUserInput()
         tileRole = TileRole_Working;
         gameState = GameState_Setup;
 
-        colorState[0] = 0; colorState[1] = 0; colorState[2] = 0x3F;
+        setSolidColorOnState(0b100, colorState);
         showAnimation(ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY, DONT_CARE);
 
         updateDifficulty(difficulty); // called to update the faces to show the current difficulty
@@ -379,7 +398,7 @@ void handleUserInput()
             }
           }
 
-          overlayState[0] = overlayState[1] = 0x3F; overlayState[2] = 0x0;
+          setSolidColorOnState(0b011, overlayState);
           showAnimation(ANIM_SEQ_INDEX__OVERLAY_TO_BASE, ANIM_RATE_FAST);
 
           updateWorkingState();
@@ -396,9 +415,7 @@ void handleUserInput()
         if (tileRole == TileRole_Tool)
         {
           // Cycle through the primary colors and white
-          assignedTool.color = (assignedTool.color == COLOR_WHITE) ? 0 : (assignedTool.color + 1);
-          showAnimation_Tool();
-          enqueueCommOnFace(rootFace, Command_ToolColor, assignedTool.color);
+          updateToolColor((assignedTool.color == COLOR_WHITE) ? 0 : (assignedTool.color + 1));
         }
         break;
 
@@ -415,6 +432,13 @@ void handleUserInput()
   }
 }
 
+void __attribute__((noinline)) updateToolColor(byte color)
+{
+  assignedTool.color = color;
+  showAnimation_Tool();
+  enqueueCommOnFace(rootFace, Command_ToolColor, assignedTool.color);
+}
+
 void __attribute__((noinline)) resetTileState()
 {
   gameState = GameState_Init;
@@ -423,7 +447,7 @@ void __attribute__((noinline)) resetTileState()
   showAnimation_Init();
 }
 
-void resetGame()
+void __attribute__((noinline)) resetGame()
 {
   // Can only reset once every so often to prevent infinite loops
   if (!resetTimer.isExpired())
@@ -473,7 +497,7 @@ void resetCommOnFace(byte f)
 
 // Called by the main program when this tile needs to tell something to
 // a neighbor tile.
-void enqueueCommOnFace(byte f, Command command, byte data)
+void __attribute__((noinline)) enqueueCommOnFace(byte f, Command command, byte data)
 {
   // Check here so callers don't all need to check
   if (!faceStatesComm[f].neighborPresent)
@@ -633,7 +657,7 @@ void processCommForFace(Command command, byte value, byte f)
       gameState = GameState_Setup;
       if (tileRole == TileRole_Tool)
       {
-        colorState[0] = colorState[1] = colorState[2] = 0x3F;
+        setSolidColorOnState(0b111, colorState);
         showAnimation(ANIM_SEQ_INDEX__BASE, DONT_CARE);
       }
       break;
@@ -659,7 +683,7 @@ void processCommForFace(Command command, byte value, byte f)
         {
           showAnimation_Tool();
           
-          overlayState[0] = overlayState[1] = 0x3F; overlayState[2] = 0x0;
+          setSolidColorOnState(0b011, overlayState);
           showAnimation_BurstOutward(f);
         }
       }
@@ -843,11 +867,22 @@ void generateToolsAndPuzzle()
 
 void updateWorkingState()
 {
+  prevState[0] = colorState[0];
+  prevState[1] = colorState[1];
+  prevState[2] = colorState[2];
+
   colorState[0] = startingState[0];
   colorState[1] = startingState[1];
   colorState[2] = startingState[2];
 
   updateStateWithTools(colorState);
+
+  // Determine which faces changed
+  byte changedFaces = (prevState[0] ^ colorState[0]) | (prevState[1] ^ colorState[1]) | (prevState[2] ^ colorState[2]);
+
+  // Pulse the changed faces
+  overlayState[0] = overlayState[1] = overlayState[2] = changedFaces;
+  showAnimation(ANIM_SEQ_INDEX__STATE_CHANGED, ANIM_RATE_SLOW);
 }
 
 void updateStateWithTools(byte *state)
@@ -949,7 +984,7 @@ void playWorking()
   if (autoWin)
   {
     autoWin = false;
-    colorState[0] = colorState[1] = colorState[2] = 0;
+    setSolidColorOnState(0b000, colorState);
   }
 #endif
   
@@ -1007,9 +1042,8 @@ void setupNextRainbowColor(byte value)
   overlayState[0] = colorState[0];
   overlayState[1] = colorState[1];
   overlayState[2] = colorState[2];
-  colorState[0] = (value & 0x1) ? 0x3F : 0;
-  colorState[1] = (value & 0x2) ? 0x3F : 0;
-  colorState[2] = (value & 0x4) ? 0x3F : 0;
+  
+  setSolidColorOnState(value, colorState);
 }
 
 // =================================================================================================
@@ -1056,7 +1090,7 @@ void generateNewStartingSeed()
 
 void showAnimation_Init()
 {
-  colorState[0] = colorState[1] = colorState[2] = 0x3F;
+  setSolidColorOnState(0b111, colorState);
   showAnimation(ANIM_SEQ_INDEX__SPIN, ANIM_RATE_SLOW);
   
   FOREACH_FACE(f)
@@ -1090,7 +1124,7 @@ void showAnimation_Tool()
   }
   else
   {
-    colorState[0] = 0; colorState[1] = 0; colorState[2] = 0;
+    setSolidColorOnState(0b000, colorState);
     colorState[assignedTool.color] = mask;
   }
   showAnimation(ANIM_SEQ_INDEX__BASE, DONT_CARE);
@@ -1128,6 +1162,13 @@ byte __attribute__((noinline)) getColorFromState(byte state, byte bitOffset)
   return colorByte;
 }
 
+void __attribute__((noinline)) setSolidColorOnState(byte color, byte *state)
+{
+  state[0] = (color & 0x1) ? 0x3F : 0;
+  state[1] = (color & 0x2) ? 0x3F : 0;
+  state[2] = (color & 0x4) ? 0x3F : 0;
+}
+
 void renderAnimationStateOnFace(byte f)
 {
   FaceStateGame *faceStateGame = &faceStatesGame[f];
@@ -1139,6 +1180,7 @@ void renderAnimationStateOnFace(byte f)
   byte overlayR = getColorFromState(overlayState[0], f);
   byte overlayG = getColorFromState(overlayState[1], f);
   byte overlayB = getColorFromState(overlayState[2], f);
+  bool overlayNonZero = overlayR | overlayG | overlayB;
   
   byte colorRGB[3];
   byte paused = false;  
@@ -1171,6 +1213,14 @@ void renderAnimationStateOnFace(byte f)
     }
       break;
 
+    case AnimCommand_LerpOverlayIfNonZeroToBase:
+      if (!overlayNonZero)
+      {
+        colorRGB[0] = r;
+        colorRGB[1] = g;
+        colorRGB[2] = b;
+        break;
+      }
     case AnimCommand_LerpOverlayToBase:
       t = 128 - t;
     case AnimCommand_LerpBaseToOverlay:
