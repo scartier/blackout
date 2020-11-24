@@ -36,3 +36,7 @@ There is at least one guaranteed solution for every puzzle. Some may have more t
 Once you win, click any tile to reset all tiles to their starting state. You can then select a new difficulty or number of Tool Tiles for your next puzzle.
 
 Good luck!
+
+### Reset
+
+Long press any tile to reset it back to its initial state.
