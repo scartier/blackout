@@ -5,6 +5,8 @@ Blackout! is a single player puzzle game for 2-7 Blinks. Realistically, you'll w
 The goal is to turn off all the colors on your Working Tile using the surrounding Tool Tiles.
 
 ### Setup
+Be sure to grab the .ino and the blinklib.cpp. I modified the stock blinklib slightly to gain a bit of needed code space. If you don't grab that then you'll get errors when compiling.
+
 After programming your tiles, they will display a slowly spinning half-face on each tile.
 
 #### Working Tile
