@@ -9,7 +9,7 @@
 #define USE_DATA_SPONGE         0
 #define DEBUG_SETUP             0
 #define DEBUG_AUTO_WIN          0
-
+#define REDUNDANT_ROLE_CHECKS   0
 
 #if USE_DATA_SPONGE
 #warning DATA SPONGE ENABLED
@@ -69,6 +69,7 @@ enum Command
   Command_ToolPattern,
   Command_ToolRotation,
   Command_ToolColor,
+  Command_ResetToolColor,
   
   Command_SetGameState,
 
@@ -359,6 +360,15 @@ void handleUserInput()
     if (gameState == GameState_Setup && tileRole == TileRole_Working)
     {
       updateDifficulty(difficulty + 1);
+    }
+    else if (gameState == GameState_Play && tileRole == TileRole_Working)
+    {
+      FOREACH_FACE(f)
+      {
+        faceStatesGame[f].neighborTool.color = COLOR_WHITE;
+        enqueueCommOnFace(f, Command_ResetToolColor, DONT_CARE);
+      }
+      updateWorkingState();
     }
     else if (gameState == GameState_Play && tileRole == TileRole_Tool)
     {
@@ -662,7 +672,9 @@ void processCommForFace(Command command, byte value, byte f)
       tileRole = (TileRole) value;
       rootFace = f;
       gameState = GameState_Setup;
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Tool)
+#endif
       {
         setSolidColorOnState(0b111, colorState);
         showAnimation(ANIM_SEQ_INDEX__BASE, DONT_CARE);
@@ -670,7 +682,9 @@ void processCommForFace(Command command, byte value, byte f)
       break;
 
     case Command_AssignToolPattern:
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Tool)
+#endif
       {
         assignedTool.pattern = value;
         assignedTool.color = COLOR_WHITE;
@@ -683,7 +697,9 @@ void processCommForFace(Command command, byte value, byte f)
       break;
       
     case Command_SetGameState:
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Tool)
+#endif
       {
         gameState = (GameState) value;
         if (gameState == GameState_Play)
@@ -699,7 +715,9 @@ void processCommForFace(Command command, byte value, byte f)
     case Command_RequestPattern:
       // Only the working tile can request Tool info - update the root face
       rootFace = f;
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Tool)
+#endif
       {
         enqueueCommOnFace(f, Command_ToolPattern, assignedTool.pattern);
       }
@@ -708,7 +726,9 @@ void processCommForFace(Command command, byte value, byte f)
     case Command_RequestRotation:
       // Only the working tile can request Tool info - update the root face
       rootFace = f;
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Tool)
+#endif
       {
         // We send the face that received this comm so the requester can compute our relative rotation
         enqueueCommOnFace(f, Command_ToolRotation, f);
@@ -718,14 +738,18 @@ void processCommForFace(Command command, byte value, byte f)
     case Command_RequestColor:
       // Only the working tile can request Tool info - update the root face
       rootFace = f;
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Tool)
+#endif
       {
         enqueueCommOnFace(f, Command_ToolColor, assignedTool.color);
       }
       break;
 
     case Command_ToolPattern:
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Working)
+#endif
       {
         faceStatesGame[f].neighborTool.pattern = value;
         enqueueCommOnFace(f, Command_RequestRotation, DONT_CARE);
@@ -733,7 +757,9 @@ void processCommForFace(Command command, byte value, byte f)
       break;
 
     case Command_ToolRotation:
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Working)
+#endif
       {
         // Figure out how the Tool tile is rotated relative to the Working tile
         byte oppositeFace = OPPOSITE_FACE(value);
@@ -747,15 +773,28 @@ void processCommForFace(Command command, byte value, byte f)
       break;
       
     case Command_ToolColor:
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Working)
+#endif
       {
         faceStatesGame[f].neighborTool.color = value;
         updateWorkingState();
       }
       break;
 
-    case Command_PuzzleSolved:
+    case Command_ResetToolColor:
+#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Tool)
+#endif
+      {
+        updateToolColor(COLOR_WHITE);
+      }
+      break;
+
+    case Command_PuzzleSolved:
+#if REDUNDANT_ROLE_CHECKS
+      if (tileRole == TileRole_Tool)
+#endif
       {
         gameState = GameState_Done;
         setupNextRainbowColor(value);
