@@ -1,4 +1,4 @@
-// BLACKOUT!
+// DISPEL!
 // (c) 2020 Scott Cartier
 
 #define null 0
@@ -13,9 +13,10 @@
 
 #if USE_DATA_SPONGE
 #warning DATA SPONGE ENABLED
-byte sponge[28];
+byte sponge[29];
 #endif
 // SPONGE LOG
+// 12/9: After new animations: 31 to init, 29 to complete a game
 // 11/22: Setup & win animations: 25
 // 11/21: Added an animation timer per-face instead of per-tile
 // 11/20: Changed to Blackout! which removed all the tool patterns and difficulty structures: 70-75
@@ -28,6 +29,10 @@ byte __attribute__((noinline)) randRange(byte min, byte max);
 void __attribute__((noinline)) setSolidColorOnState(byte color, byte *state);
 void __attribute__((noinline)) updateToolColor(byte color);
 void __attribute__((noinline)) resetGame();
+void __attribute__((noinline)) setupNextRainbowColor(byte value);
+void __attribute__((noinline)) showAnimation_Init();
+void __attribute__((noinline)) updateStateWithTools(byte *state);
+void __attribute__((noinline)) showAnimation_Tool();
 
 
 byte faceOffsetArray[] = { 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5 };
@@ -129,12 +134,12 @@ byte patterns[] =
   0b0100,
   0b0011,   // 3
   0b0101,
-  0b1001,
   0b1010,
+  0b1001,
   0b0111,   // 4
   0b1011,
   0b1101,
-  0b1111    // 5 (unused)
+  0b1111    // 5
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -146,16 +151,19 @@ enum AnimCommand
   AnimCommand_SolidBase,
   AnimCommand_SolidOverlay,
   AnimCommand_SolidWithOverlay,
-  AnimCommand_SolidOff,
   AnimCommand_BaseAndOverlay,
   AnimCommand_LerpBaseToOverlay,
   AnimCommand_LerpOverlayToBase,
   AnimCommand_LerpOverlayIfNonZeroToBase,
+  AnimCommand_LerpBaseToOverlayIfNonZero,
   AnimCommand_Pause,
   AnimCommand_PauseHalf,
   AnimCommand_FadeInBase,
   AnimCommand_FadeOutBase,
-//  AnimCommand_FadeOutOverlay,
+  AnimCommand_FadeOutBaseIfOverlayR,
+  AnimCommand_RandomRotateBaseAndOverlayR,
+  AnimCommand_RandomToolOnBase,
+  
   AnimCommand_Loop,
   AnimCommand_Done
 };
@@ -163,21 +171,6 @@ enum AnimCommand
 // Start each face at a different command
 AnimCommand animSequences[] =
 {
-  // INIT
-  AnimCommand_SolidOff,
-  AnimCommand_FadeInBase,
-  AnimCommand_SolidBase,
-  AnimCommand_Pause,
-  AnimCommand_SolidBase,
-  AnimCommand_Pause,
-  AnimCommand_SolidBase,
-  AnimCommand_FadeOutBase,
-  AnimCommand_SolidOff,
-  AnimCommand_Pause,
-  AnimCommand_SolidOff,
-  AnimCommand_Pause,
-  AnimCommand_Loop,
-
   // CONSTANT COLOR - BASE ONLY
   AnimCommand_SolidBase,
   AnimCommand_Loop,
@@ -198,14 +191,32 @@ AnimCommand animSequences[] =
   AnimCommand_LerpOverlayIfNonZeroToBase,
   AnimCommand_SolidBase,
   AnimCommand_Done,
+
+  // INIT
+  AnimCommand_RandomRotateBaseAndOverlayR,
+  AnimCommand_FadeOutBaseIfOverlayR,
+  AnimCommand_Loop,
+
+  // BASE + PULSE OVERLAY
+  AnimCommand_LerpBaseToOverlayIfNonZero,
+  AnimCommand_LerpOverlayIfNonZeroToBase,
+  AnimCommand_Loop,
+
+  // TOOL
+  AnimCommand_RandomToolOnBase,
+  AnimCommand_FadeInBase,
+  AnimCommand_FadeOutBase,
+  AnimCommand_Loop,
 };
 
-#define ANIM_SEQ_INDEX__INIT                    0
-#define ANIM_SEQ_INDEX__BASE                    (ANIM_SEQ_INDEX__INIT+13)
+#define ANIM_SEQ_INDEX__BASE                    0
 #define ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY       (ANIM_SEQ_INDEX__BASE+2)
 #define ANIM_SEQ_INDEX__OVERLAY_TO_BASE_DELAYED (ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY+2)
 #define ANIM_SEQ_INDEX__OVERLAY_TO_BASE         (ANIM_SEQ_INDEX__OVERLAY_TO_BASE_DELAYED+2)
 #define ANIM_SEQ_INDEX__STATE_CHANGED           (ANIM_SEQ_INDEX__OVERLAY_TO_BASE_DELAYED+5)
+#define ANIM_SEQ_INDEX__INIT                    (ANIM_SEQ_INDEX__STATE_CHANGED+4)
+#define ANIM_SEQ_INDEX__BASE_PULSE_OVERLAY      (ANIM_SEQ_INDEX__INIT+3)
+#define ANIM_SEQ_INDEX__TOOL_SETUP              (ANIM_SEQ_INDEX__BASE_PULSE_OVERLAY+3)
 
 // Shift by 2 so it fits in a byte
 #define ANIM_RATE_SLOW (1000>>2)
@@ -256,7 +267,6 @@ FaceStateGame faceStatesGame[FACE_COUNT];
 byte startingState[3];        // how the puzzle starts
 byte colorState[3];           // the current state displayed
 byte overlayState[3];         // used for animations or to hide things
-byte prevState[3];            // the previous color state for comparisons
 
 #define RESET_TIMER_DELAY 3000
 Timer resetTimer;             // prevents cyclic resets
@@ -275,6 +285,10 @@ bool autoWin = false;
 
 void setup()
 {
+  // Temporary random seed is our tile's serial number
+  // At least it is random per-tile
+  randState = getSerialNumberByte(0);
+  
 #if USE_DATA_SPONGE
   // Use our data sponge so that it isn't compiled away
   if (sponge[0])
@@ -308,9 +322,18 @@ void loop()
   switch (gameState)
   {
     case GameState_Init:  break; // do nothing - waiting for click in handleUserInput()
-    case GameState_Setup: loopSetup();  break;
-    case GameState_Play:  loopPlay();   break;
-    case GameState_Done:  loopDone();   break;
+    case GameState_Setup:
+      if (tileRole == TileRole_Working)
+      {
+        setupWorking();
+      }
+      else
+      {
+        setupTool();
+      }
+      break;
+    case GameState_Play:  playWorking();  break;
+    case GameState_Done:  doneWorking();  break;
   }
 
   render();
@@ -385,7 +408,7 @@ void handleUserInput()
         gameState = GameState_Setup;
 
         setSolidColorOnState(0b100, colorState);
-        showAnimation(ANIM_SEQ_INDEX__BASE_PLUS_OVERLAY, DONT_CARE);
+        showAnimation(ANIM_SEQ_INDEX__BASE_PULSE_OVERLAY, ANIM_RATE_FAST);
 
         updateDifficulty(difficulty); // called to update the faces to show the current difficulty
 
@@ -481,6 +504,11 @@ void __attribute__((noinline)) resetGame()
   {
     enqueueCommOnFace(f, Command_Reset, DONT_CARE);
   }
+}
+
+byte __attribute__((noinline)) rotateSixBits(byte inByte, byte rotateAmount)
+{
+  return ((inByte << rotateAmount) | (inByte >> (6 - rotateAmount))) & 0x3F;
 }
 
 // =================================================================================================
@@ -676,8 +704,7 @@ void processCommForFace(Command command, byte value, byte f)
       if (tileRole == TileRole_Tool)
 #endif
       {
-        setSolidColorOnState(0b111, colorState);
-        showAnimation(ANIM_SEQ_INDEX__BASE, DONT_CARE);
+        showAnimation(ANIM_SEQ_INDEX__TOOL_SETUP, ANIM_RATE_SLOW);
       }
       break;
 
@@ -762,9 +789,7 @@ void processCommForFace(Command command, byte value, byte f)
 #endif
       {
         // Figure out how the Tool tile is rotated relative to the Working tile
-        byte oppositeFace = OPPOSITE_FACE(value);
-        char offset = f - oppositeFace;
-        faceStatesGame[f].neighborTool.rotation = (offset < 0) ? (offset + 6) : offset;
+        faceStatesGame[f].neighborTool.rotation = CCW_FROM_FACE(f, value + 3);
         if (gameState == GameState_Play)
         {
           enqueueCommOnFace(f, Command_RequestColor, DONT_CARE);
@@ -815,15 +840,6 @@ void processCommForFace(Command command, byte value, byte f)
 //
 // =================================================================================================
 
-void loopSetup()
-{
-  switch (tileRole)
-  {
-    case TileRole_Working:  setupWorking(); break;
-    case TileRole_Tool:     setupTool(); break;
-  }
-}
-
 // -------------------------------------------------------------------------------------------------
 // WORKING
 // -------------------------------------------------------------------------------------------------
@@ -852,9 +868,11 @@ void generateToolsAndPuzzle()
   // but we don't want it to factor into the seed for tool selection because tools
   // shouldn't change based on it.
 
+/*
   uint32_t puzzleSeed = startingSeed;
   puzzleSeed |= (uint32_t) numToolTiles << 24;
   puzzleSeed |= (uint32_t) difficulty << 28;
+*/
 
   byte toolSlotIndex = randRange(0, 6 - numToolTiles + 2);
   FOREACH_FACE(f)
@@ -876,7 +894,7 @@ void generateToolsAndPuzzle()
   }
 
   // Now that we're generating the actual puzzle, use a seed that includes [19:16]
-  randState = puzzleSeed;
+//  randState = puzzleSeed;
 
   // Fill up the starting state with our tools
   startingState[0] = startingState[1] = startingState[2] = 0;
@@ -913,9 +931,9 @@ void generateToolsAndPuzzle()
 
 void updateWorkingState()
 {
-  prevState[0] = colorState[0];
-  prevState[1] = colorState[1];
-  prevState[2] = colorState[2];
+  byte prevStateR = colorState[0];
+  byte prevStateG = colorState[1];
+  byte prevStateB = colorState[2];
 
   colorState[0] = startingState[0];
   colorState[1] = startingState[1];
@@ -924,48 +942,32 @@ void updateWorkingState()
   updateStateWithTools(colorState);
 
   // Determine which faces changed
-  byte changedFaces = (prevState[0] ^ colorState[0]) | (prevState[1] ^ colorState[1]) | (prevState[2] ^ colorState[2]);
+  byte changedFaces = (prevStateR ^ colorState[0]) | (prevStateG ^ colorState[1]) | (prevStateB ^ colorState[2]);
 
   // Pulse the changed faces
   overlayState[0] = overlayState[1] = overlayState[2] = changedFaces;
   showAnimation(ANIM_SEQ_INDEX__STATE_CHANGED, ANIM_RATE_SLOW);
 }
 
-void updateStateWithTools(byte *state)
+void __attribute__((noinline)) updateStateWithTools(byte *state)
 {
   // Apply all the attached tools
   FOREACH_FACE(f)
   {
     if (faceStatesComm[f].neighborPresent)
     {
-      applyTool(faceStatesGame[f].neighborTool, state);
+      ToolState tool = faceStatesGame[f].neighborTool;
+      if (tool.pattern != TOOL_PATTERN_UNASSIGNED && tool.color != COLOR_WHITE)
+      {
+        byte toolMask = 0x1 | (tool.pattern << 1);
+        
+        // Apply rotation
+        toolMask = rotateSixBits(toolMask, tool.rotation);
+      
+        state[tool.color] ^= toolMask;
+      }
     }
   }
-}
-
-void applyTool(ToolState tool, byte *state)
-{
-  if (tool.pattern == TOOL_PATTERN_UNASSIGNED)
-  {
-    return;
-  }
-  if (tool.color == COLOR_WHITE)
-  {
-    return;
-  }
-        
-  // Save old state to know if we changed anything by applying this tool
-  byte oldState[3];
-  oldState[0] = state[0];
-  oldState[1] = state[1];
-  oldState[2] = state[2];
-  
-  byte toolMask = 0x1 | (tool.pattern << 1);
-  
-  // Apply rotation
-  toolMask = ((toolMask << tool.rotation) | (toolMask >> (6 - tool.rotation))) & 0x3F;
-
-  state[tool.color] ^= toolMask;
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -987,16 +989,13 @@ void setupTool()
 //
 // =================================================================================================
 
-void loopPlay()
-{
-  switch (tileRole)
-  {
-    case TileRole_Working:  playWorking(); break;
-  }
-}
-
 void playWorking()
 {
+  if (tileRole != TileRole_Working)
+  {
+    return;
+  }
+  
   // Check for a Tool added or removed
   if (numNeighbors != numToolTiles)
   {
@@ -1049,16 +1048,13 @@ void playWorking()
 //
 // =================================================================================================
 
-void loopDone()
-{
-  switch (tileRole)
-  {
-    case TileRole_Working:  doneWorking(); break;
-  }
-}
-
 void doneWorking()
 {
+  if (tileRole != TileRole_Working)
+  {
+    return;
+  }
+  
   // CELEBRATORY ANIMATION!
   FOREACH_FACE(f)
   {
@@ -1083,7 +1079,7 @@ void doneWorking()
   }
 }
 
-void setupNextRainbowColor(byte value)
+void __attribute__((noinline)) setupNextRainbowColor(byte value)
 {
   overlayState[0] = colorState[0];
   overlayState[1] = colorState[1];
@@ -1134,15 +1130,9 @@ void generateNewStartingSeed()
 //
 // =================================================================================================
 
-void showAnimation_Init()
+void __attribute__((noinline)) showAnimation_Init()
 {
-  setSolidColorOnState(0b111, colorState);
-  showAnimation(ANIM_SEQ_INDEX__INIT, ANIM_RATE_SLOW);
-
-  FOREACH_FACE(f)
-  {
-    faceStatesGame[f].animIndexCur += f * 2;
-  }
+  showAnimation(ANIM_SEQ_INDEX__INIT, ANIM_RATE_FAST * 2 + randRange(0, 100));
 }
 
 void showAnimation_BurstOutward(byte f)
@@ -1159,7 +1149,7 @@ void showAnimation_BurstOutward(byte f)
   }
 }
 
-void showAnimation_Tool()
+void __attribute__((noinline)) showAnimation_Tool()
 {
   // Create the mask corresponding to the pattern
   byte mask = 0x1 | (assignedTool.pattern << 1);
@@ -1227,13 +1217,16 @@ void renderAnimationStateOnFace(byte f)
   byte overlayG = getColorFromState(overlayState[1], f);
   byte overlayB = getColorFromState(overlayState[2], f);
   bool overlayNonZero = overlayR | overlayG | overlayB;
+  bool hasOverlay = (overlayState[0] | overlayState[1] | overlayState[2]) & (1<<f);
   
   byte colorRGB[3];
   byte paused = false;  
   bool startNextCommand = faceStateGame->animTimer.isExpired();
   uint32_t animRate32 = (uint32_t) faceStateGame->animRateDiv4 << 2;
   uint32_t t = (128 * (animRate32 - faceStateGame->animTimer.getRemaining())) / animRate32;  // 128 = 1.0
-  switch (animSequences[faceStateGame->animIndexCur])
+  
+  AnimCommand animCommand = animSequences[faceStateGame->animIndexCur];
+  switch (animCommand)
   {
     case AnimCommand_SolidBase:
       colorRGB[0] = r;
@@ -1250,34 +1243,31 @@ void renderAnimationStateOnFace(byte f)
       break;
 
     case AnimCommand_SolidWithOverlay:
-    {
-      bool hasOverlay = (overlayState[0] | overlayState[1] | overlayState[2]) & (1<<f);
       colorRGB[0] = hasOverlay ? overlayR : r;
       colorRGB[1] = hasOverlay ? overlayG : g;
       colorRGB[2] = hasOverlay ? overlayB : b;
       startNextCommand = true;
-    }
-      break;
-
-    case AnimCommand_SolidOff:
-      colorRGB[0] = colorRGB[1] = colorRGB[2] = 0;
-      startNextCommand = true;
       break;
 
     case AnimCommand_LerpOverlayIfNonZeroToBase:
-      if (!overlayNonZero)
-      {
-        colorRGB[0] = r;
-        colorRGB[1] = g;
-        colorRGB[2] = b;
-        break;
-      }
     case AnimCommand_LerpOverlayToBase:
       t = 128 - t;
+    case AnimCommand_LerpBaseToOverlayIfNonZero:
     case AnimCommand_LerpBaseToOverlay:
       colorRGB[0] = lerpColor(r, overlayR, t);
       colorRGB[1] = lerpColor(g, overlayG, t);
       colorRGB[2] = lerpColor(b, overlayB, t);
+
+      if (animCommand == AnimCommand_LerpOverlayIfNonZeroToBase ||
+          animCommand == AnimCommand_LerpBaseToOverlayIfNonZero)
+      {
+        if (!overlayNonZero)
+        {
+          colorRGB[0] = r;
+          colorRGB[1] = g;
+          colorRGB[2] = b;
+        }
+      }
       break;
 
     case AnimCommand_Pause:
@@ -1285,12 +1275,38 @@ void renderAnimationStateOnFace(byte f)
       paused = true;
       break;
 
-    case AnimCommand_FadeOutBase:
-      t = 128 - t;
     case AnimCommand_FadeInBase:
-      colorRGB[0] = lerpColor(0, r, t);
-      colorRGB[1] = lerpColor(0, g, t);
-      colorRGB[2] = lerpColor(0, b, t);
+      t = 128 - t;
+    case AnimCommand_FadeOutBase:
+      // Force the code below to do the lerp
+      overlayR = 1;
+    case AnimCommand_FadeOutBaseIfOverlayR:
+      colorRGB[0] = colorRGB[1] = colorRGB[2] = 0;
+      if (overlayR)
+      {
+        colorRGB[0] = lerpColor(r, 0, t);
+        colorRGB[1] = lerpColor(g, 0, t);
+        colorRGB[2] = lerpColor(b, 0, t);
+      }
+      break;
+      
+    case AnimCommand_RandomRotateBaseAndOverlayR:
+      colorState[0] = randGetByte();
+      colorState[1] = randGetByte();
+      colorState[2] = randGetByte();
+      overlayState[0] = 1 << randRange(0, 6);
+      
+      paused = true;
+      startNextCommand = true;
+      break;
+
+    case AnimCommand_RandomToolOnBase:
+      byte randByte = randGetByte() | 0x2;
+      byte toolPattern = (randByte & 0x3E) >> (randByte & 0x1) ;
+      colorState[0] = colorState[1] = colorState[2] = toolPattern;
+      
+      paused = true;
+      startNextCommand = true;
       break;
   }
 
