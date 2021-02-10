@@ -380,9 +380,23 @@ void handleUserInput()
 
   if (buttonDoubleClicked())
   {
-    if (gameState == GameState_Setup && tileRole == TileRole_Working)
+    if (gameState == GameState_Setup && tileRole == TileRole_Working && numNeighbors > 0)
     {
-      updateDifficulty(difficulty + 1);
+      gameState = GameState_Play;
+      
+      // Start the game
+      FOREACH_FACE(f)
+      {
+        if (faceStatesComm[f].neighborPresent)
+        {
+          enqueueCommOnFace(f, Command_SetGameState, GameState_Play);
+        }
+      }
+
+      setSolidColorOnState(0b011, overlayState);
+      showAnimation(ANIM_SEQ_INDEX__OVERLAY_TO_BASE, ANIM_RATE_FAST);
+
+      updateWorkingState();
     }
     else if (gameState == GameState_Play && tileRole == TileRole_Working)
     {
@@ -425,29 +439,9 @@ void handleUserInput()
         break;
 
       case GameState_Setup:
-        if (tileRole == TileRole_Working && numNeighbors > 0)
+        if (tileRole == TileRole_Working)
         {
-          gameState = GameState_Play;
-          
-          // Start the game
-          FOREACH_FACE(f)
-          {
-            if (faceStatesComm[f].neighborPresent)
-            {
-              enqueueCommOnFace(f, Command_SetGameState, GameState_Play);
-            }
-          }
-
-          setSolidColorOnState(0b011, overlayState);
-          showAnimation(ANIM_SEQ_INDEX__OVERLAY_TO_BASE, ANIM_RATE_FAST);
-
-          updateWorkingState();
-        }
-        else if (tileRole == TileRole_Tool)
-        {
-#if DEBUG_SETUP
-          showAnimation_Tool();
-#endif
+          updateDifficulty(difficulty + 1);
         }
         break;
 
@@ -789,7 +783,8 @@ void processCommForFace(Command command, byte value, byte f)
 #endif
       {
         // Figure out how the Tool tile is rotated relative to the Working tile
-        faceStatesGame[f].neighborTool.rotation = CCW_FROM_FACE(f, value + 3);
+        byte oppositeFace = OPPOSITE_FACE(value);
+        faceStatesGame[f].neighborTool.rotation = CCW_FROM_FACE(f, oppositeFace);
         if (gameState == GameState_Play)
         {
           enqueueCommOnFace(f, Command_RequestColor, DONT_CARE);
@@ -1121,6 +1116,7 @@ void generateNewStartingSeed()
 
   // We encode the starting seed as color patterns on 5 of the 6 faces
   // That way the player can copy the seed and post it to share or save it to try again
+  // NOTE: Seed sharing is not implemented due to space limitations
   startingSeed = randState & 0x000FFFFF;
 }
 
