@@ -816,9 +816,17 @@ void processCommForFace(Command command, byte value, byte f)
       if (tileRole == TileRole_Tool)
 #endif
       {
-        gameState = GameState_Done;
-        setupNextRainbowColor(value);
-        showAnimation_BurstOutward(f);
+        // BUGFIX : While doing the winning rainbow burst, resetting the tiles by clicking a rune
+        //          tile had a race condition where the hex tile would send out one last 'PuzzleSolved'
+        //          message before resetting, causing the tile you just clicked to go back to
+        //          rainbow. Now, once you reset the game on a tile, it cannot be considered
+        //          solved again.
+        if (gameState != GameState_Init)
+        {
+          gameState = GameState_Done;
+          setupNextRainbowColor(value);
+          showAnimation_BurstOutward(f);
+        }
       }
       break;
       
