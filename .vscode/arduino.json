@@ -1,0 +1,6 @@
+{
+    "board": "Blinks-SDK-1.1.0-GM:avr:blink",
+    "programmer": "Blinks-SDK-1.1.0-GM:usbtinyisp",
+    "port": "COM1",
+    "sketch": "blinklib.cpp"
+}

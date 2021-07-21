@@ -170,10 +170,18 @@ struct face_t {
     millis_t sendTime;      // Next time we will transmit on this face (set to 0 every time we get a good message so we ping-pong across the link)
     
     uint8_t inDatagramLen;  // 0= No datagram waiting to be read
+#if 1
+    uint8_t inDatagramData[8];
+#else
     uint8_t inDatagramData[IR_DATAGRAM_LEN];
+#endif
 
     uint8_t outDatagramLen;  // 0= No datagram waiting to be sent
+#if 1
+    uint8_t outDatagramData[8];
+#else
     uint8_t outDatagramData[IR_DATAGRAM_LEN];
+#endif
 };
 
 static face_t faces[FACE_COUNT];
