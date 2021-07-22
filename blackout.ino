@@ -164,6 +164,8 @@ enum AnimCommand
   AnimCommand_BaseAndOverlay,
   AnimCommand_LerpBaseToOverlay,
   AnimCommand_LerpOverlayToBase,
+  AnimCommand_LerpBaseToBaseHalf,
+  AnimCommand_LerpBaseHalfToBase,
   AnimCommand_LerpOverlayIfNonZeroToBase,
   AnimCommand_LerpBaseToOverlayIfNonZero,
   AnimCommand_Pause,
@@ -224,13 +226,8 @@ AnimCommand animSequences[] =
 
   // WORKING PULSE
   // Used: While idle, the working tile will play this anim to differentiate itself from the tool tiles
-  AnimCommand_PauseHalf,
-  AnimCommand_PauseHalf,
-  AnimCommand_PauseHalf,
-  AnimCommand_PauseHalf,
-  AnimCommand_PauseHalf,
-  AnimCommand_PauseHalf,
-  AnimCommand_LerpOverlayToBase,
+  AnimCommand_LerpBaseToBaseHalf,
+  AnimCommand_LerpBaseHalfToBase,
   AnimCommand_SolidBase,
   AnimCommand_Done,
 };
@@ -248,7 +245,7 @@ AnimCommand animSequences[] =
 #define ANIM_RATE_SLOW (1000>>2)
 #define ANIM_RATE_FAST (300>>2)
 
-#define WORKING_PULSE_RATE 5000
+#define WORKING_PULSE_RATE 1000
 Timer workingPulseTimer;
 
 // Rainbow order bitwise 1=b001=R, 3=b011=R+G, 2=b010=G, 6=b110=G+B, 4=b100=B, 5=b101=B+R
@@ -423,7 +420,6 @@ void handleUserInput()
           enqueueCommOnFace(f, Command_SetGameState, GameState_Play);
         }
       }
-
       setYellowOnState(overlayState);
       showAnimation(ANIM_SEQ_INDEX__OVERLAY_TO_BASE, ANIM_RATE_FAST);
 
@@ -1083,10 +1079,6 @@ void playWorking()
   {
     setSolidColorOnState(0b111, overlayState);
     showAnimation(ANIM_SEQ_INDEX__WORKING_PULSE, ANIM_RATE_FAST);
-    FOREACH_FACE(f)
-    {
-      faceStatesGame[f].animIndexCur += f;
-    }
     resetWorkingPulseTimer();
   }
 
@@ -1302,6 +1294,15 @@ void renderAnimationStateOnFace(byte f)
   uint32_t t = (128 * (animRate32 - faceStateGame->animTimer.getRemaining())) / animRate32;  // 128 = 1.0
   
   AnimCommand animCommand = animSequences[faceStateGame->animIndexCur];
+
+  if (animCommand == AnimCommand_LerpBaseHalfToBase ||
+      animCommand == AnimCommand_LerpBaseToBaseHalf)
+  {
+    overlayR = (r >> 1) + (r >> 2);
+    overlayG = (g >> 1) + (g >> 2);
+    overlayB = (b >> 1) + (b >> 2);
+  }
+
   switch (animCommand)
   {
     case AnimCommand_SolidBase:
@@ -1327,9 +1328,11 @@ void renderAnimationStateOnFace(byte f)
 
     case AnimCommand_LerpOverlayIfNonZeroToBase:
     case AnimCommand_LerpOverlayToBase:
+    case AnimCommand_LerpBaseHalfToBase:
       t = 128 - t;
     case AnimCommand_LerpBaseToOverlayIfNonZero:
     case AnimCommand_LerpBaseToOverlay:
+    case AnimCommand_LerpBaseToBaseHalf:
       colorRGB[0] = lerpColor(r, overlayR, t);
       colorRGB[1] = lerpColor(g, overlayG, t);
       colorRGB[2] = lerpColor(b, overlayB, t);
