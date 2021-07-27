@@ -1,48 +1,43 @@
-# Blackout!
-### Summary
-Blackout! is a single player puzzle game for 2-7 Blinks. Realistically, you'll want at least 4 Blinks to have a minimum of challenge.
+# Dispel!
+(formerly known as Blackout!)
 
-The goal is to turn off all the colors on your Puzzle Tile using the surrounding Color Tiles.
+Dispel! challenges you to turn off all faces of your puzzle by applying the correct combination of runes. Use your logic, deduction, and wits to dispel the hex!
 
-### Setup
-Be sure to grab the .ino and the blinklib.cpp. I modified the stock blinklib slightly to gain a bit of needed code space. If you don't grab that then you'll get errors when compiling.
+## SETUP
+With your tiles programmed, they will be sparkling colors. Click a tile to select it as your Hex tile. It will glow blue. All tiles touching your Hex tile automatically become Rune tiles and display randomly changing patterns.
 
-After programming your tiles, they will display a slowly spinning half-face on each tile.
+`TIP: If you accidentally create more than one blue Hex tile, hold the button to reset it and start over.`
 
-#### Puzzle Tile
-Click one tile to choose it as your Puzzle Tile. It will turn blue with a single yellow wedge. That yellow wedge indicates your selected puzzle difficulty.
+## DIFFICULTY
+There are two methods to adjust puzzle difficulty: number of Rune tiles, and Rune pattern complexity.
 
-Difficulty ranges from 1-6 and affects the patterns on the Color Tiles you are given. Higher difficulties give more complicated Color Tiles. Double click the Puzzle Tile to cycle your difficulty level.
+### NUMBER OF RUNES
+During setup, you may add or remove Rune tiles by attaching or detaching them from your Hex tile. You can have from one to six Rune tiles in play, though only having one or two runes will make the puzzle trivially easy. In general, the more Rune tiles in play, the more difficult the puzzle. Set aside any unused tiles.
 
-#### Color Tiles
-During setup, all other tiles touching your Puzzle Tile automatically become Color Tiles and turn solid white. Add or remove Color Tiles as you wish before starting the game. More Color Tiles also increases difficulty. [**Hint: Start with two or three Color Tiles on difficulty 1 to learn the basics**]
+### RUNE COMPLEXITY
+You can also increase the pattern complexity on your Rune tiles. Click the Hex tile to cycle through all six difficulty levels. The number of pulsing yellow faces on the Hex tile indicates the current complexity level.
 
-### Play
-Once you have selected your difficulty level and number of Color Tiles, click the Puzzle Tile again to start the game. Your Puzzle Tile will reveal the puzzle and your Color Tiles will show their assigned patterns in white.
+`TIP: First time player? Start with two or three Rune tiles at complexity level one. You’ll get the hang of it faster!`
 
-Your goal is to turn off all of the colors on your Puzzle Tile!
+## PLAY
+Satisfied with the difficulty? Double click the Hex tile to begin. The Hex tile now contains your puzzle and the Rune tiles have revealed their patterns. The game is on!
 
-#### Manipulating Tool Tiles
-Clicking a Color Tile will cycle its color to Red, then Green, then Blue, and back to White. When not white, the Color Tile will influence your Puzzle Tile by toggling that color on all of the corresponding faces.
+### RUNE COLOR
+Each rune starts white, which means it has no effect on the puzzle. Click a rune to cycle among red, green, and blue. Runes attached to the Hex tile will toggle the same color on the same faces of the puzzle. Meaning, if the puzzle face contains the color, it will turn off, otherwise it will turn on.
 
-For instance, if your Color Tile is red and has its top face lit, then attaching it to your Puzzle Tile will toggle the red color on *its* top face.
+### RUNE ROTATION
+Rotate your Rune tile by detaching, turning, and reattaching it to the Hex tile. This lets you control the faces of the hex that are affected by the rune.
 
-Remember: Magenta is a combination of red and blue, Cyan combines blue and green, and Yellow combines red and green. Of course white combines all three.
+`TIP: It doesn’t matter to which side of the Hex tile you attach the Rune tile.`
 
-Detach and rotate tiles so that they influence the faces you want on the Puzzle Tile.
+### COLOR COMBINATIONS
+Don’t forget that base colors combine. For example, a magenta face is a combination of red and blue. You will need to toggle all lit colors, using a combination of runes, to completely turn off a face.
 
-Double click a Color tile during play to reset it to white. Or double click the Puzzle tile during play to reset *all* attached Color tiles to white.
+`TIP: Double click any Rune tile to disable it and turn it back to white. Double click the Hex tile to disable all connected Rune tiles and start the puzzle over.`
 
-### Winning
+## RESET
+At any time you may reset the tiles by holding down any button in the cluster.
 
-Can you deduce the correct combinations of colors and rotations for your Color Tiles that will result in a Blackout on the Puzzle Tile?
-
-There is at least one guaranteed solution for every puzzle. Some have more than one solution or may even be solvable without using all of the Color Tiles.
-
-Once you win, click any tile to reset all tiles to their starting state. You can then select a new difficulty or number of Color Tiles for your next puzzle.
-
-Good luck!
-
-### Reset
-
-Long press any tile at any time to reset all tiles back to their initial state.
+## WIN CONDITION
+You win once you fully dispel the hex! You will be treated with a magic rainbow burst. Click any tile to reset and start anew.
+There is at least one guaranteed solution for every puzzle, but there may be more. There may even be a solution that does not use every rune!
