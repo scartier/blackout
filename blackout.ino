@@ -126,9 +126,9 @@ TileRole tileRole = TileRole_Unassigned;
 
 struct ToolState
 {
-  byte pattern  : 4;
-  byte color    : 2;
-  byte rotation : 3;
+  byte pattern;
+  byte color;
+  byte rotation;
 };
 
 #define TOOL_PATTERN_UNASSIGNED 0b1110    // unused pattern is our "unassigned" key value

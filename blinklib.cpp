@@ -298,14 +298,11 @@ static void setColorNow( Color newColor ) {
 
 
 Color dim( Color color, byte brightness) {
-  return color;
-  /*
     return MAKECOLOR_5BIT_RGB(
     (GET_5BIT_R(color)*brightness)/255,
     (GET_5BIT_G(color)*brightness)/255,
     (GET_5BIT_B(color)*brightness)/255
     );
-    */
 }
 
 
@@ -405,7 +402,7 @@ static void warm_sleep_cycle() {
 
         FOREACH_FACE(f) {
             
-            setColorNow( dim( BLUE, fade_brightness ) );
+            setColorNow( makeColorRGB(0, 0, fade_brightness ) );
             
             fade_brightness -= animation_fade_step;
 
@@ -512,7 +509,7 @@ static void warm_sleep_cycle() {
             
             // INcrement first - they are already seeing OFF when we start
             fade_brightness += animation_fade_step;                        
-            setColorNow( dim( WHITE, fade_brightness ) );
+            setColorNow( makeColorRGB(fade_brightness, fade_brightness, fade_brightness) );
             
             blinkbios_irdata_send_packet( f ,  nop_wake_packet , sizeof( nop_wake_packet ) );      // Note that we can use sizeof() here becuase the arrayt is explicity uint8_t which is always a byte on AVR
 
