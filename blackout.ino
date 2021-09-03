@@ -1397,7 +1397,7 @@ void renderAnimationStateOnFace(byte f)
       startNextCommand = true;
       break;
 
-    case AnimCommand_RandomToolOnBase:
+    case AnimCommand_RandomToolOnBase: {
       // TODO : Change to only show tools appropriate to the selected difficulty
       byte randByte = randGetByte() | 0x2;
       byte toolPattern = (randByte & 0x3E) >> (randByte & 0x1);
@@ -1405,11 +1405,21 @@ void renderAnimationStateOnFace(byte f)
       
       paused = true;
       startNextCommand = true;
+      }
       break;
 
-    case Command_None:
+    case AnimCommand_BaseAndOverlay:
       /* Empty */
       break;
+
+    case AnimCommand_Loop:
+      /* Empty */
+      break;
+
+    case AnimCommand_Done:
+      /* Empty */
+      break;
+      
   }
 
   Color color = makeColorRGB(colorRGB[0], colorRGB[1], colorRGB[2]);
