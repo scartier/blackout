@@ -297,7 +297,7 @@ byte overlayState[3];         // used for animations or to hide things
 #define RESET_TIMER_DELAY 3000
 Timer resetTimer;             // prevents cyclic resets
 
-uint32_t randState = 0;
+uint32_t randState;
 
 #if DEBUG_AUTO_WIN
 bool autoWin = false;
@@ -315,10 +315,20 @@ void setup()
 {
 
 
-  // Temporary random seed is our tile's serial number
-  // At least it is random per-tile
-  randState = getSerialNumberByte(0);
+  // Temporary random seed is generated detiministically from our tile's serial number
+
+  uint32_t serial_num_32 = 2463534242UL;    // We start with  Marsaglia's seed...
+
+  // ... and then fold in bits form our serial number
   
+  for( byte i=0; i< SERIAL_NUMBER_LEN; i++ ) {
+
+    serial_num_32 ^=  getSerialNumberByte(i) << (i * 3);
+
+  }
+
+  randState=serial_num_32;
+ 
 #if USE_DATA_SPONGE
   // Use our data sponge so that it isn't compiled away
   if (sponge[0])
