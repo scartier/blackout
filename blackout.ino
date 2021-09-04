@@ -297,7 +297,7 @@ byte overlayState[3];         // used for animations or to hide things
 #define RESET_TIMER_DELAY 3000
 Timer resetTimer;             // prevents cyclic resets
 
-uint32_t randState = 0;
+uint32_t randState;
 
 #if DEBUG_AUTO_WIN
 bool autoWin = false;
@@ -309,12 +309,26 @@ bool autoWin = false;
 //
 // =================================================================================================
 
+#include <avr/io.h>
+
 void setup()
 {
-  // Temporary random seed is our tile's serial number
-  // At least it is random per-tile
-  randState = getSerialNumberByte(0);
+
+
+  // Temporary random seed is generated detiministically from our tile's serial number
+
+  uint32_t serial_num_32 = 2463534242UL;    // We start with  Marsaglia's seed...
+
+  // ... and then fold in bits form our serial number
   
+  for( byte i=0; i< SERIAL_NUMBER_LEN; i++ ) {
+
+    serial_num_32 ^=  getSerialNumberByte(i) << (i * 3);
+
+  }
+
+  randState=serial_num_32;
+ 
 #if USE_DATA_SPONGE
   // Use our data sponge so that it isn't compiled away
   if (sponge[0])
@@ -330,6 +344,7 @@ void setup()
   }
 */
 
+  //setColor(GREEN);
   showAnimation_Init();
 }
 
@@ -341,6 +356,7 @@ void setup()
 
 void loop()
 {
+
   // Detect button clicks
   handleUserInput();
 
@@ -349,7 +365,7 @@ void loop()
 
   switch (gameState)
   {
-    case GameState_Init:  break; // do nothing - waiting for click in handleUserInput()
+    case GameState_Init: break; // do nothing - waiting for click in handleUserInput()
     case GameState_Setup:
       if (tileRole == TileRole_Working)
       {
@@ -363,6 +379,7 @@ void loop()
     case GameState_Play:  playWorking();  break;
     case GameState_Done:  doneWorking();  break;
   }
+
 
   render();
 
@@ -874,6 +891,10 @@ void processCommForFace(Command command, byte value, byte f)
     case Command_Reset:
       resetGame();
       break;
+
+    case Command_None:
+      /* Empty */
+      break;      
   }
 }
 
@@ -1327,11 +1348,16 @@ void renderAnimationStateOnFace(byte f)
       break;
 
     case AnimCommand_LerpOverlayIfNonZeroToBase:
+      /* fall through */    
     case AnimCommand_LerpOverlayToBase:
+      /* fall through */
     case AnimCommand_LerpBaseHalfToBase:
       t = 128 - t;
+      /* fall through */
     case AnimCommand_LerpBaseToOverlayIfNonZero:
+      /* fall through */
     case AnimCommand_LerpBaseToOverlay:
+      /* fall through */
     case AnimCommand_LerpBaseToBaseHalf:
       colorRGB[0] = lerpColor(r, overlayR, t);
       colorRGB[1] = lerpColor(g, overlayG, t);
@@ -1356,9 +1382,11 @@ void renderAnimationStateOnFace(byte f)
 
     case AnimCommand_FadeInBase:
       t = 128 - t;
+      /* fall through */
     case AnimCommand_FadeOutBase:
       // Force the code below to do the lerp
       overlayR = 1;
+      /* fall through */
     case AnimCommand_FadeOutBaseIfOverlayR:
       colorRGB[0] = colorRGB[1] = colorRGB[2] = 0;
       if (overlayR)
@@ -1379,7 +1407,7 @@ void renderAnimationStateOnFace(byte f)
       startNextCommand = true;
       break;
 
-    case AnimCommand_RandomToolOnBase:
+    case AnimCommand_RandomToolOnBase: {
       // TODO : Change to only show tools appropriate to the selected difficulty
       byte randByte = randGetByte() | 0x2;
       byte toolPattern = (randByte & 0x3E) >> (randByte & 0x1);
@@ -1387,7 +1415,21 @@ void renderAnimationStateOnFace(byte f)
       
       paused = true;
       startNextCommand = true;
+      }
       break;
+
+    case AnimCommand_BaseAndOverlay:
+      /* Empty */
+      break;
+
+    case AnimCommand_Loop:
+      /* Empty */
+      break;
+
+    case AnimCommand_Done:
+      /* Empty */
+      break;
+      
   }
 
   Color color = makeColorRGB(colorRGB[0], colorRGB[1], colorRGB[2]);
@@ -1396,6 +1438,8 @@ void renderAnimationStateOnFace(byte f)
     color.as_uint16 = faceStateGame->savedColor;
   }
   faceStateGame->savedColor = color.as_uint16;
+
+  
   setColorOnFace(color, f);
 
   if (startNextCommand)
