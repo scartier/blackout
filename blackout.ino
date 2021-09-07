@@ -100,7 +100,7 @@ struct CommandAndData
   byte data : 4;
 };
 
-#define COMM_QUEUE_SIZE 4
+#define COMM_QUEUE_SIZE 8
 CommandAndData commQueues[FACE_COUNT][COMM_QUEUE_SIZE];
 
 #define COMM_INDEX_ERROR_OVERRUN 0xFF
@@ -596,14 +596,12 @@ void __attribute__((noinline)) enqueueCommOnFace(byte f, Command command, byte d
     return;
   }
 
-/*
   if (commInsertionIndexes[f] >= COMM_QUEUE_SIZE)
   {
     // Buffer overrun - might need to increase queue size to accommodate
-    commInsertionIndexes[f] = COMM_INDEX_ERROR_OVERRUN;
+//    commInsertionIndexes[f] = COMM_INDEX_ERROR_OVERRUN;
     return;
   }
-*/
 
   byte index = commInsertionIndexes[f];
   commQueues[f][index].command = command;
