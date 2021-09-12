@@ -629,6 +629,7 @@ static void RX_IRFaces() {
                             if ( packetDataLen == 2 && decodedByte == TRIGGER_WARM_SLEEP_SPECIAL_VALUE && packetData[1] == TRIGGER_WARM_SLEEP_SPECIAL_VALUE ) {
                                 
                                 warm_sleep_cycle();                                
+                                blinkbios_button_block.bitflags = 0;
                                 
                             }
                             
