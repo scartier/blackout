@@ -509,10 +509,13 @@ void handleUserInput()
     }
   }
 
-  // No matter what state we're in, long pressing resets the game and other connected tiles
-  if (buttonLongPressed())
+  // No matter what state we're in, triple click resets the game and other connected tiles
+  if (buttonMultiClicked())
   {
-    resetGame();
+    if (buttonClickCount() == 3)
+    {
+      resetGame();
+    }
   }
 }
 
