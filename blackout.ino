@@ -868,9 +868,7 @@ void processCommForFace(Command command, byte value, byte f)
       break;
       
     case Command_ToolColor:
-#if REDUNDANT_ROLE_CHECKS
       if (tileRole == TileRole_Working)
-#endif
       {
         faceStatesGame[f].neighborTool.color = value;
         updateWorkingState();
