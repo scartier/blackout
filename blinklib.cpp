@@ -171,14 +171,14 @@ struct face_t {
     
     uint8_t inDatagramLen;  // 0= No datagram waiting to be read
 #if 1
-    uint8_t inDatagramData[8];
+    uint8_t inDatagramData[1];
 #else
     uint8_t inDatagramData[IR_DATAGRAM_LEN];
 #endif
 
     uint8_t outDatagramLen;  // 0= No datagram waiting to be sent
 #if 1
-    uint8_t outDatagramData[8];
+    uint8_t outDatagramData[1];
 #else
     uint8_t outDatagramData[IR_DATAGRAM_LEN];
 #endif
