@@ -764,13 +764,11 @@ void processCommForFace(Command command, byte value, byte f)
   {
     case Command_AssignRole:
       // Grab our new role
-      tileRole = (TileRole) value;
-      rootFace = f;
-      gameState = GameState_Setup;
-#if REDUNDANT_ROLE_CHECKS
-      if (tileRole == TileRole_Tool)
-#endif
+      if (tileRole != TileRole_Working)
       {
+        tileRole = (TileRole) value;
+        rootFace = f;
+        gameState = GameState_Setup;
         showAnimation(ANIM_SEQ_INDEX__TOOL_SETUP, ANIM_RATE_SLOW);
       }
       break;
