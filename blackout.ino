@@ -250,6 +250,8 @@ Timer workingPulseTimer;
 
 // Rainbow order bitwise 1=b001=R, 3=b011=R+G, 2=b010=G, 6=b110=G+B, 4=b100=B, 5=b101=B+R
 byte rainbowSequence[] = { 1, 3, 2, 6, 4, 5 };
+byte lesserSequence[] = { 3, 2, 6, 3, 2, 6 };   // when solving without using all runes
+byte *winSequence = rainbowSequence;
 byte rainbowIndex = 0;
 
 // -------------------------------------------------------------------------------------------------
@@ -266,6 +268,7 @@ enum GameState
 
 GameState gameState = GameState_Init;
 byte numToolTiles = 0;
+byte numActiveToolTiles = 0;
 
 #define NUM_DIFFICULTY_LEVELS 6
 byte difficulty = 0;
@@ -1130,6 +1133,17 @@ void playWorking()
     // TOTAL BLACKOUT - PUZZLE SOLVED
     gameState = GameState_Done;
     rainbowIndex = 0;
+
+    // Determine which sequence to use depending whether the player used all the rune tiles
+    numActiveToolTiles = 0;
+    FOREACH_FACE(f)
+    {
+      if (faceStatesComm[f].neighborPresent && faceStatesGame[f].neighborTool.color != COLOR_WHITE)
+      {
+        numActiveToolTiles++;
+      }
+    }
+    winSequence = (numActiveToolTiles == numToolTiles) ? rainbowSequence : lesserSequence;
   }
 }
 
@@ -1162,11 +1176,11 @@ void doneWorking()
   }
 
   // Start our next color and tell neighbors to start theirs
-  setupNextRainbowColor(rainbowSequence[rainbowIndex]);
+  setupNextRainbowColor(winSequence[rainbowIndex]);
   showAnimation(ANIM_SEQ_INDEX__OVERLAY_TO_BASE, ANIM_RATE_FAST);
   FOREACH_FACE(f)
   {
-    enqueueCommOnFace(f, Command_PuzzleSolved, rainbowSequence[rainbowIndex]);
+    enqueueCommOnFace(f, Command_PuzzleSolved, winSequence[rainbowIndex]);
   }
   rainbowIndex++;
   if (rainbowIndex > 5)
@@ -1452,7 +1466,6 @@ void renderAnimationStateOnFace(byte f)
   }
   faceStateGame->savedColor = color.as_uint16;
 
-  
   setColorOnFace(color, f);
 
   if (startNextCommand)
