@@ -976,17 +976,24 @@ void generateToolsAndPuzzle()
 
   // Fill up the starting state with our tools
   startingState[0] = startingState[1] = startingState[2] = 0;
-  byte randColor = randRange(0, 3);   // randomly start at R G or B
+  byte getRandColor = 1;
+  byte randColor;   // randomly start at R G or B
   FOREACH_FACE(f)
   {
     if (faceStatesComm[f].neighborPresent)
     {
-      faceStatesGame[f].neighborTool.color = randColor;
-      faceStatesGame[f].neighborTool.rotation = randRange(0, FACE_COUNT);
+      if (getRandColor)
+      {
+        randColor = randRange(0, 3);
+      }
+      else
+      {
+        randColor = (randColor == 2) ? 0 : (randColor + 1);
+      }
+      getRandColor = 1 - getRandColor;
 
-      // Go sequentially through RGB
-      // Could just select a random color every time, but that might result in some puzzles being all one color
-      randColor = (randColor == 2) ? 0 : (randColor + 1);
+      faceStatesGame[f].neighborTool.color = randColor;
+      faceStatesGame[f].neighborTool.rotation = randRange(0, FACE_COUNT);      
     }
   }
   updateStateWithTools(startingState);
@@ -1044,8 +1051,9 @@ void __attribute__((noinline)) updateStateWithTools(byte *state)
         byte toolMask = 0x1 | (tool.pattern << 1);
         
         // Apply rotation
-        toolMask = rotateSixBits(toolMask, tool.rotation);
-      
+        //toolMask = rotateSixBits(toolMask, tool.rotation);
+        toolMask = ((toolMask << tool.rotation) | (toolMask >> (6 - tool.rotation))) & 0x3F;
+
         state[tool.color] ^= toolMask;
       }
     }
@@ -1180,7 +1188,7 @@ void __attribute__((noinline)) setupNextRainbowColor(byte value)
   overlayState[0] = colorState[0];
   overlayState[1] = colorState[1];
   overlayState[2] = colorState[2];
-  
+
   setSolidColorOnState(value, colorState);
 }
 
